@@ -3,6 +3,9 @@ from __future__ import annotations
 import pickle
 import time
 from pathlib import Path
+import os
+
+os.makedirs('plots', exist_ok=True)
 
 try:
     import matplotlib
