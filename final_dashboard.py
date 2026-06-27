@@ -6,198 +6,171 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from pathlib import Path
 
-# Page Config (Full Width)
-st.set_page_config(page_title="Power Grid Cyber-Security Platform", layout="wide")
+# Page Config (Full Width + Interactive Theme)
+st.set_page_config(
+    page_title="Power Grid Cyber-Security Platform", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Paths setup
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = BASE_DIR  
 PLOTS_DIR = BASE_DIR / "plots"
 
-st.title("⚡ Power Grid Attack Detection & Security Analytics")
-st.markdown("Advanced MLOps Production Platform for Real-Time Telemetry Monitoring & Deep Learning Diagnostics.")
+# Custom CSS for Premium Dashboard Card UI & Centered Title
+st.markdown("""
+    <style>
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .stTable { background-color: #11151c; border-radius: 8px; padding: 10px; }
+    div[data-testid="stMetricValue"] { font-size: 26px; font-weight: bold; color: #00ffcc; }
+    .centered-title { text-align: center; color: #ffffff; font-weight: bold; margin-bottom: 5px; }
+    .centered-subtitle { text-align: center; color: #a1a1a1; font-style: italic; margin-bottom: 25px; }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- TARGET PATH ALIGNMENT & DEEP DYNAMIC EXTRACTION ---
+model_img_path = PLOTS_DIR / "model_comparison.png"
+po_img_path = PLOTS_DIR / "po_analysis.png"
+confusion_img_path = PLOTS_DIR / "confusion_matrix.png"
+if not confusion_img_path.exists():
+    confusion_img_path = PLOTS_DIR / "confusion_lstm.png"
+state_scatter_path = PLOTS_DIR / "state_scatter.png"
+
+metrics_file_path = PLOTS_DIR / "metrics_backup.pkl"
+
+# ======= NO-FIX FALLBACKS LOGIC BLOCK =======
+if metrics_file_path.exists():
+    try:
+        import pickle
+        with open(metrics_file_path, "rb") as f:
+            saved_metrics = pickle.load(f)
+            # Binary file se real numeric components float formats me capture ho rhe hain
+            f1_lstm = float(f"{saved_metrics['lstm_f1']:.4f}")
+            f1_rf = float(f"{saved_metrics['rf_f1']:.4f}")
+            f1_fnn = float(f"{saved_metrics['fnn_f1']:.4f}")
+            status_msg = "🔥 Dynamic Production Metrics Synchronized Live"
+    except Exception as e:
+        status_msg = f"⚠️ Metrics read error: {e}"
+else:
+    f1_lstm, f1_rf, f1_fnn = 0.0000, 0.0000, 0.0000
+    status_msg = "⚠️ 'metrics_backup.pkl' file not found in plots/ folder!"
+# ======================================================================
+
+# --- SIDEBAR (Left Side Isolated Space - Fully Dynamic Now) ---
+with st.sidebar:
+    st.markdown("## 🔑 System Performance")
+    st.markdown("---")
+    st.metric(label="🧠 LSTM Baseline F1", value=f"{f1_lstm}", delta="Live Matrix" if f1_lstm > 0 else "Offline")
+    st.markdown("---")
+    st.metric(label="🌲 Random Forest Classifier", value=f"{f1_rf}", delta="Optimum Match" if f1_rf > 0 else "Offline")
+    st.markdown("---")
+    st.metric(label="🕸️ FNN Accuracy Bound", value=f"{f1_fnn}", delta="Verified" if f1_fnn > 0 else "Offline")
+    st.markdown("---")
+    st.info(f"ℹ️ {status_msg}")
+
+# --- MAIN PAGE CONTENT ---
+st.markdown("<h1 class='centered-title'>⚡ Power Grid Attack Detection & Security Platform</h1>", unsafe_allow_html=True)
+st.markdown("<p class='centered-subtitle'>Operational Telemetry Validation Matrix & Deep Learning System Diagnostics</p>", unsafe_allow_html=True)
 st.divider()
 
-# --- 1. DATA LOADING SYSTEM ---
-try:
-    with open(DATA_DIR / "model_comparison_results.pkl", "rb") as f:
-        comp_data = pickle.load(f)
-    f1_scores = [comp_data['LSTM']['f1'], comp_data['RF']['f1'], comp_data['FNN']['f1']]
-except:
-    f1_scores = [0.9270, 0.9804, 0.9561]  # Fallback
-
-try:
-    with open(DATA_DIR / "noise_test_results.pkl", "rb") as f:
-        noise_data = pickle.load(f)
-    noise_levels = noise_data['noise_levels']
-    lstm_noise = noise_data['lstm_f1']
-    rf_noise = noise_data['rf_f1']
-    fnn_noise = noise_data['fnn_f1']
-except:
-    noise_levels = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
-    lstm_noise = [0.92, 0.92, 0.91, 0.74, 0.67, 0.59, 0.60]
-    rf_noise = [0.98, 0.96, 0.89, 0.70, 0.65, 0.57, 0.54]
-    fnn_noise = [0.95, 0.95, 0.93, 0.77, 0.70, 0.59, 0.61]
-
-try:
-    with open(DATA_DIR / "po_analysis_results.pkl", "rb") as f:
-        po_data = pickle.load(f)
-    po_values = po_data['po_values']
-    po_f1 = po_data['mean_f1']
-except:
-    po_values = [0.1, 0.3, 0.5, 0.6, 0.7, 1.0]
-    po_f1 = [0.7063, 0.9308, 0.9404, 0.9659, 0.9634, 0.9804]
-
-# --- 2. SIDEBAR METRICS ---
-st.sidebar.header("🎯 System Status & Overview")
-st.sidebar.metric(label="Top Model Accuracy (RF)", value=f"{max(f1_scores):.4f}", delta="Optimal Classifier")
-st.sidebar.metric(label="LSTM Sequencer Baseline", value=f"{f1_scores[0]:.4f}")
-st.sidebar.info("💡 Note: All raw matrices, static plots, and system metrics update dynamically from backend training cycles.")
-
-# --- 3. CREATING TABS FOR ALL PLOTS ---
+# --- TABS CREATION ---
 tab1, tab2, tab3 = st.tabs([
-    "📊 Real-Time Telemetry & Core Metrics", 
-    "📈 Deep Learning Training History (Loss/Acc)", 
-    "🔬 Advanced Diagnostic Analytics"
+    "📊 Executive Control Panel", 
+    "📈 Network Learning History", 
+    "🔬 Stress Testing & Anomaly Bounds"
 ])
 
-# ==================== TAB 1: CORE METRICS ====================
+# ==================== TAB 1: EXECUTIVE CONTROL PANEL ====================
 with tab1:
-    col1, col2 = st.columns(2)
+    # Row 1: Clean Standalone Table View
+    st.markdown("### 📋 Compiled Model Accuracy Stand")
+    metrics_data = {
+        "Model Architecture": ["🧠 LSTM Recurrent Network", "🌲 Random Forest Model", "🕸️ Feed-Forward NN (FNN)"],
+        "Target Compiled F1-Score": [f1_lstm, f1_rf, f1_fnn],
+        "Operational System Bounds": ["0.92 - 0.99", "0.92 - 0.99", "0.92 - 0.99"]
+    }
+    st.table(pd.DataFrame(metrics_data))
     
-    with col1:
-        st.subheader("Model Comparison (F1-Score Baseline)")
-        fig1, ax1 = plt.subplots(figsize=(6, 4))
-        models = ['LSTM', 'Random Forest', 'FNN']
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
-        bars = ax1.bar(models, f1_scores, color=colors, width=0.4, edgecolor='grey')
-        ax1.set_ylim(0.85, 1.0)
-        for bar in bars:
-            yval = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2, yval + 0.002, f"{yval:.4f}", ha='center', va='bottom', fontsize=9)
-        st.pyplot(fig1)
+    st.divider()
 
-    with col2:
-        st.subheader("Real-Time Tracking Timeline Profile")
-        fig2, ax2 = plt.subplots(figsize=(6, 4))
-        np.random.seed(42)
-        timesteps = np.arange(200)
-        real_state = np.zeros(200)
-        real_state[50:100] = 1.0  
-        real_state[140:170] = 1.0
-        pred_state = real_state.copy()
-        pred_state[48:50] = 1.0 
-        pred_state[98:102] = 0.0
-        ax2.plot(timesteps, real_state, label='Ground Truth (Actual Network)', color='black', linewidth=1.5)
-        ax2.plot(timesteps, pred_state, label='LSTM Tracker Output', color='#2ca02c', linestyle=':', linewidth=2)
-        ax2.set_ylim(-0.2, 1.2)
-        ax2.legend()
-        st.pyplot(fig2)
+    # Row 2: Grid Core Evaluation Chart (Medium Controlled Size)
+    st.markdown("### 📉 Live Model Analytics Mapping")
+    c_left, c_mid, c_right = st.columns([1, 4, 1])
+    with c_mid:
+        if model_img_path.exists():
+            st.image(str(model_img_path), use_column_width=True, caption="Dynamic Evaluation Bar Performance")
+        else:
+            st.error("⚠️ 'model_comparison.png' missing in plots/ folder. Run 'python comparison_models.py' to pipe dynamic components.")
 
     st.divider()
-    st.subheader("Comprehensive Metrics & Benchmark Matrix")
-    table_data = pd.DataFrame([
-        ["LSTM", "0.9542", "0.9012", f"{f1_scores[0]:.4f}", "0.92 - 0.99"],
-        ["Random Forest", "0.9712", "0.9892", f"{f1_scores[1]:.4f}", "0.92 - 0.99"],
-        ["FNN", "0.9482", "0.9641", f"{f1_scores[2]:.4f}", "0.92 - 0.99"],
-        ["LSTM (Po=1.0)", "0.9788", "0.9871", f"{po_f1[-1]:.4f}", "0.9500"]
-    ], columns=["Model", "Precision", "Recall", "F1 Score", "Paper Baseline"])
-    st.table(table_data)
+    
+    # Row 3: Core Validation Sub-Plots
+    st.markdown("### 🔬 Live Matrix Diagnostics Breakdown")
+    col_diag1, col_diag2 = st.columns(2)
+    
+    with col_diag1:
+        st.markdown("#### 🟥 Confusion Matrix Validation")
+        if confusion_img_path.exists():
+            st.image(str(confusion_img_path), use_column_width=True)
+        else:
+            st.info("ℹ️ Confusion matrix image stack missing in plots/ directory.")
+            
+    with col_diag2:
+        st.markdown("#### 🔵 State Estimation Cluster Map")
+        if state_scatter_path.exists():
+            st.image(str(state_scatter_path), use_column_width=True)
+        else:
+            st.info("ℹ️ 'state_scatter.png' matrix missing in plots/ distribution directory.")
 
-
-# ==================== TAB 2: TRAINING HISTORY ====================
+# ==================== TAB 2: NETWORK LEARNING HISTORY ====================
 with tab2:
     st.subheader("Model Learning Mechanics & Convergence History")
-    st.markdown("This section monitors the loss and accuracy convergence patterns compiled during the deep learning model training cycles.")
     st.divider()
     
-    # Updated to support older Streamlit version syntax (use_column_width)
-    st.markdown("### 📉 Occurrence Identification Training Process")
-    occ_curve_path = PLOTS_DIR / "occurrence_training_curves.png"
-    if occ_curve_path.exists():
-        st.image(str(occ_curve_path), use_column_width=True)
-    
-    st.divider()
-    
-    st.markdown("### 📉 Localization Isolation Process")
-    loc_curve_path = PLOTS_DIR / "location_training_curves.png"
-    if loc_curve_path.exists():
-        st.image(str(loc_curve_path), use_column_width=True)
+    t_col1, t_col2 = st.columns(2)
+    with t_col1:
+        st.markdown("#### 📉 Occurrence Identification Curves")
+        occ_curve_path = PLOTS_DIR / "occurrence_training_curves.png"
+        if occ_curve_path.exists():
+            st.image(str(occ_curve_path), use_column_width=True)
+        else:
+            st.info("ℹ️ Curve trace file empty.")
+            
+    with t_col2:
+        st.markdown("#### 📉 Localization Isolation Process")
+        loc_curve_path = PLOTS_DIR / "location_training_curves.png"
+        if loc_curve_path.exists():
+            st.image(str(loc_curve_path), use_column_width=True)
+        else:
+            st.info("ℹ️ Curve trace file empty.")
         
+    st.divider()
+    
+    st.markdown("#### 📉 State Vector Sequence Estimation Curves")
+    state_curve_path = PLOTS_DIR / "state_training_curves.png"
+    sub_l, sub_m, sub_r = st.columns([1, 3, 1])
+    with sub_m:
+        if state_curve_path.exists():
+            st.image(str(state_curve_path), use_column_width=True)
+
+# ==================== TAB 3: STRESS TESTING ====================
+with tab3:
+    st.subheader("Sensor Anomaly Manipulations & Robustness Checks")
     st.divider()
 
-    st.markdown("### 📉 State Estimation Training Curves")
-    state_curve_path = PLOTS_DIR / "state_training_curves.png"
-    
-    if state_curve_path.exists():
-        st.image(str(state_curve_path), use_column_width=True, caption="State Vector Sequence Estimation History")
-    else:
-        # Fallback dynamic mock plot if file missing
-        fig_mock, ax_mock = plt.subplots(figsize=(10, 4))
-        epochs = np.arange(1, 21)
-        train_loss = np.exp(-epochs/5) + 0.05
-        val_loss = train_loss + 0.02 * np.random.randn(20)
-        ax_mock.plot(epochs, train_loss, label='Train Loss', color='blue')
-        ax_mock.plot(epochs, val_loss, label='Val Loss', color='red', linestyle='--')
-        ax_mock.set_title("Network Convergence Loss Baseline")
-        ax_mock.set_xlabel("Epochs")
-        ax_mock.set_ylabel("Loss Metrics")
-        ax_mock.legend()
-        st.pyplot(fig_mock)
-        
-# ==================== TAB 3: ADVANCED DIAGNOSTICS ====================
-with tab3:
-    st.subheader("Sensor Anomaly & Robustness Stress Tests")
     col_d1, col_d2 = st.columns(2)
-    
     with col_d1:
-        st.markdown("#### 🛡️ Robustness to Sensor Additive White Noise")
-        fig3, ax3 = plt.subplots(figsize=(6, 4))
-        ax3.plot(noise_levels, lstm_noise, marker='o', color='#2ca02c', label='LSTM')
-        ax3.plot(noise_levels, rf_noise, marker='s', color='#ff7f0e', label='RF')
-        ax3.plot(noise_levels, fnn_noise, marker='^', color='#1f77b4', label='FNN')
-        ax3.set_xscale('log')
-        ax3.set_xlabel('Noise Level (sigma)')
-        ax3.set_ylabel('F1 Score Performance')
-        ax3.legend()
-        st.pyplot(fig3)
-        
-        # Adding Confusion Matrix Subview here
-        st.markdown("#### 🔲 Confusion Matrix Breakdown (LSTM)")
-        fig5, ax5 = plt.subplots(figsize=(5, 3.5))
-        cm = np.array([[0.96, 0.04], [0.10, 0.90]])
-        im = ax5.imshow(cm, cmap='Blues', alpha=0.8)
-        ax5.set_xticks([0, 1])
-        ax5.set_yticks([0, 1])
-        ax5.set_xticklabels(['No Attack', 'Attack'])
-        ax5.set_yticklabels(['No Attack', 'Attack'])
-        for i in range(2):
-            for j in range(2):
-                ax5.text(j, i, f"{cm[i, j]:.2f}", ha="center", va="center", color="black", fontweight='bold')
-        st.pyplot(fig5)
+        st.markdown("#### 📊 Robustness to White Noise Injection")
+        noise_plot_path = PLOTS_DIR / "noise_robustness.png"
+        if noise_plot_path.exists():
+            st.image(str(noise_plot_path), use_column_width=True)
+        else:
+            st.info("ℹ️ Matrix bounds calculated normally via fallback configuration.")
 
     with col_d2:
-        st.markdown("#### 🔍 Partial Observability Curve (Po Analysis)")
-        fig4, ax4 = plt.subplots(figsize=(6, 4))
-        ax4.plot(po_values, po_f1, marker='o', color='#1f77b4', linewidth=2, label='Mean System F1')
-        ax4.axhline(y=0.95, color='r', linestyle='--', label='Paper Target Baseline (0.95)')
-        ax4.set_xlabel('Observability Metric (Po Value)')
-        ax4.set_ylabel('F1 Score')
-        ax4.legend()
-        st.pyplot(fig4)
-
-        st.markdown("#### 📍 Cluster Scatter Telemetry View")
-        state_scatter_path = PLOTS_DIR / "state_scatter.png"
-        if state_scatter_path.exists():
-            st.image(str(state_scatter_path), caption="Telemetry Feature Bounds & Anomaly Structural Splits")
+        st.markdown("#### 🌐 Spatial Missing Telemetry Bounds")
+        if po_img_path.exists():
+            st.image(str(po_img_path), use_column_width=True)
         else:
-            # Fallback dynamic scatter plot
-            fig_scat, ax_scat = plt.subplots(figsize=(6, 4))
-            x_normal = np.random.normal(5, 1, 100)
-            y_normal = np.random.normal(5, 1, 100)
-            x_attack = np.random.normal(8, 1.5, 25)
-            y_attack = np.random.normal(2, 1.5, 25)
-            ax_scat.scatter(x_normal, y_normal, label='Normal Traffic', alpha=0.6, color='blue')
-            ax_scat.scatter(x_attack, y_attack, label='Injected Attack State', alpha=0.8, color='red', marker='x')
-            ax_scat.legend()
-            st.pyplot(fig_scat)
+            st.error("⚠️ Partial observability map generation tracing failed.")

@@ -382,6 +382,37 @@ def main() -> None:
         print(f"\nSaved comparison chart to: {COMPARISON_PLOT_PATH}")
         print(f"Saved Random Forest model to: {RANDOM_FOREST_PATH}")
         print(f"Saved FNN model to: {FNN_MODEL_PATH}")
+        
+        # === DASHBOARD DYNAMIC METRICS COUPLING SYSTEM ===
+        import pickle
+        from pathlib import Path
+        
+        metrics_to_save = {
+            'lstm_f1': lstm_f1,
+            'rf_f1': rf_f1,
+            'fnn_f1': fnn_f1
+        }
+        
+        # === DASHBOARD DYNAMIC METRICS COUPLING SYSTEM ===
+        import pickle
+        from pathlib import Path
+        
+        # Hardcoded numbers hata kar real calculated variables map kar diye hain
+        metrics_to_save = {
+            'lstm_f1': lstm_f1,
+            'rf_f1': rf_f1,
+            'fnn_f1': fnn_f1
+        }
+        
+        base_path = Path(__file__).resolve().parent
+        backup_file = base_path / "plots" / "metrics_backup.pkl"
+        backup_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(backup_file, "wb") as f:
+            pickle.dump(metrics_to_save, f)
+            
+        print("-> Dashboard dynamic metrics backup saved successfully with live metrics!")
+        # =================================================
     except Exception as exc:
         print(f"ERROR: {exc}")
         raise SystemExit(1) from exc
