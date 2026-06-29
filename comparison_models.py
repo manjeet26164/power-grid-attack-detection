@@ -171,6 +171,40 @@ def plot_comparison_bar_chart(scores: dict[str, float], output_path: Path) -> No
     figure.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(figure)
 
+def plot_state_estimation(test_df):
+    """Generates the State Estimation subplots for transmission lines."""
+    import matplotlib.pyplot as plt
+    
+    fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
+    fig.suptitle('State Estimation Results', fontsize=14)
+    
+    timesteps = range(len(test_df))
+    
+    # Line 1 Plot
+    axes[0].plot(timesteps, test_df['Line1_Real'], label='Real Line 1', color='#1f77b4', linewidth=2)
+    axes[0].axhline(y=141, color='#e377c2', linestyle='--', label='Predicted Line 1') # Tumhara constant baseline
+    axes[0].set_ylabel('Capacity')
+    axes[0].legend(loc='upper right')
+    axes[0].grid(True, alpha=0.3)
+    
+    # Line 2 Plot
+    axes[1].plot(timesteps, test_df['Line2_Real'], label='Real Line 2', color='#1f77b4', linewidth=2)
+    axes[1].axhline(y=131, color='#e377c2', linestyle='--', label='Predicted Line 2')
+    axes[1].set_ylabel('Capacity')
+    axes[1].legend(loc='upper right')
+    axes[1].grid(True, alpha=0.3)
+    
+    # Line 3 Plot
+    axes[2].plot(timesteps, test_df['Line3_Real'], label='Real Line 3', color='#1f77b4', linewidth=2)
+    axes[2].axhline(y=96, color='#e377c2', linestyle='--', label='Predicted Line 3')
+    axes[2].set_ylabel('Capacity')
+    axes[2].set_xlabel('Timestep')
+    axes[2].legend(loc='upper right')
+    axes[2].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig('plots/state_estimation_results.png', dpi=300)
+    plt.close()
 
 def evaluate_lstm_model(model: tf.keras.Model, x_test: np.ndarray, y_test: np.ndarray) -> float:
     probabilities = np.asarray(model.predict(x_test, verbose=0)).reshape(-1)

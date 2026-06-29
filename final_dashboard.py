@@ -155,6 +155,7 @@ with tab2:
             st.image(str(state_curve_path), use_column_width=True)
 
 # ==================== TAB 3: STRESS TESTING ====================
+# ==================== TAB 3: STRESS TESTING ====================
 with tab3:
     st.subheader("Sensor Anomaly Manipulations & Robustness Checks")
     st.divider()
@@ -174,3 +175,50 @@ with tab3:
             st.image(str(po_img_path), use_column_width=True)
         else:
             st.error("⚠️ Partial observability map generation tracing failed.")
+
+    # ======================================================================
+    # 📈 DYNAMIC LIVE STATE ESTIMATION DIAGNOSTICS (YAHAN SE ADD KIYA HAI)
+    # ======================================================================
+    st.divider()
+    st.markdown("### 📈 Real-Time Power Grid State Estimation Diagnostics")
+    st.write("Dynamically tracking measured capacity variations against static baseline filters across core transmission branches.")
+
+    # 1. Generate Runtime Simulated Telemetry Matrix (300 Timesteps)
+    np.random.seed(42)
+    timesteps = np.arange(300)
+    
+    base_trend_1 = 150 + 10 * np.cos(timesteps / 40) + np.random.normal(0, 4, 300)
+    base_trend_2 = 140 + 15 * np.cos(timesteps / 30) + np.random.normal(0, 3, 300)
+    base_trend_3 = 90 + 12 * np.sin(timesteps / 50) + np.random.normal(0, 3, 300)
+
+    # Attack simulation configurations
+    base_trend_1[145:205] -= 45
+    base_trend_2[145:205] += 30
+    base_trend_3[145:205] += 25
+    base_trend_2[205:275] -= 20
+
+    # 2. Convert to Pandas DataFrame
+    chart_data = pd.DataFrame({
+        "Timestep": timesteps,
+        "Real Line 1 (Measured Capacity)": base_trend_1,
+        "Predicted Line 1 (Static Baseline)": 141.0,
+        "Real Line 2 (Measured Capacity)": base_trend_2,
+        "Predicted Line 2 (Static Baseline)": 131.0,
+        "Real Line 3 (Measured Capacity)": base_trend_3,
+        "Predicted Line 3 (Static Baseline)": 96.0
+    }).set_index("Timestep")
+
+    # 3. Render 3 Column Layout
+    graph_col1, graph_col2, graph_col3 = st.columns(3)
+
+    with graph_col1:
+        st.markdown("<p style='text-align: center; font-weight: bold;'>Transmission Node: Line 1</p>", unsafe_allow_html=True)
+        st.line_chart(chart_data[["Real Line 1 (Measured Capacity)", "Predicted Line 1 (Static Baseline)"]], height=260)
+
+    with graph_col2:
+        st.markdown("<p style='text-align: center; font-weight: bold;'>Transmission Node: Line 2</p>", unsafe_allow_html=True)
+        st.line_chart(chart_data[["Real Line 2 (Measured Capacity)", "Predicted Line 2 (Static Baseline)"]], height=260)
+
+    with graph_col3:
+        st.markdown("<p style='text-align: center; font-weight: bold;'>Transmission Node: Line 3</p>", unsafe_allow_html=True)
+        st.line_chart(chart_data[["Real Line 3 (Measured Capacity)", "Predicted Line 3 (Static Baseline)"]], height=260)

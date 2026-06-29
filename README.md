@@ -46,7 +46,7 @@ A sequential deep learning model optimized to detect time-series anomalies. It a
 To deploy and completely run this platform from scratch, execute the following steps in your terminal:
 
 * **Create a Virtual Environment:** Set up an isolated workspace by running `python -m venv env`.
-* **Activate the Environment:** Turn on the environment on Windows systems by running `env\Scripts\activate` or on macOS/Linux platforms by executing `source env/bin/activate`.
+* **Activate the Environment:** Turn on the environment on Windows systems by running `.venv\Scripts\activate` or on macOS/Linux platforms by executing `source env/bin/activate`.
 * **Install Dependencies:** Core libraries configuration mapped using `pip install -r requirements.txt`.
 * **Preprocess Raw Telemetry:** Process and split raw datasets by running `python preprocess_data.py`.
 * **Train Neural Architectures:** Initialize core training frameworks by executing `python train_models.py` followed by `python build_lstm_model.py`.
