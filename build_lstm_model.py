@@ -24,14 +24,10 @@ def build_shared_lstm_backbone() -> tf.keras.Sequential:
 
     model = tf.keras.Sequential(name="shared_lstm_backbone")
 
-    # The input sees 5 timesteps from 6 observed transmission lines.
     model.add(tf.keras.layers.Input(shape=INPUT_SHAPE, name="input_sequence"))
 
-    # Learn short-term and medium-term temporal patterns while preserving the sequence.
     model.add(tf.keras.layers.LSTM(128, return_sequences=True, name="lstm_128"))
     model.add(tf.keras.layers.Dropout(0.2, name="dropout_1"))
-
-    # Compress the temporal representation into a single latent vector.
     model.add(tf.keras.layers.LSTM(64, return_sequences=False, name="lstm_64"))
     model.add(tf.keras.layers.Dropout(0.2, name="dropout_2"))
 
@@ -63,11 +59,8 @@ def build_attack_occurrence_model() -> tf.keras.Model:
 def build_attack_location_model() -> tf.keras.Model:
     backbone = build_shared_lstm_backbone()
 
-    # Expand the latent vector a bit more because this task has 21 classes.
     backbone.add(tf.keras.layers.Dense(64, activation="relu", name="dense_64"))
     backbone.add(tf.keras.layers.Dropout(0.2, name="dropout_3"))
-
-    # Softmax predicts the no-attack class plus the 20 possible attacked lines.
     backbone.add(tf.keras.layers.Dense(21, activation="softmax", name="location_output"))
 
     backbone.compile(

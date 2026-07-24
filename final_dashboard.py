@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from pathlib import Path
 
-# Page Config (Full Width + Interactive Theme)
+# Page Config 
 st.set_page_config(
     page_title="Power Grid Cyber-Security Platform", 
     layout="wide",
@@ -39,13 +39,12 @@ state_scatter_path = PLOTS_DIR / "state_scatter.png"
 
 metrics_file_path = PLOTS_DIR / "metrics_backup.pkl"
 
-# ======= NO-FIX FALLBACKS LOGIC BLOCK =======
+# =======LOGIC BLOCK =======
 if metrics_file_path.exists():
     try:
         import pickle
         with open(metrics_file_path, "rb") as f:
             saved_metrics = pickle.load(f)
-            # Binary file se real numeric components float formats me capture ho rhe hain
             f1_lstm = float(f"{saved_metrics['lstm_f1']:.4f}")
             f1_rf = float(f"{saved_metrics['rf_f1']:.4f}")
             f1_fnn = float(f"{saved_metrics['fnn_f1']:.4f}")
@@ -57,7 +56,6 @@ else:
     status_msg = "⚠️ 'metrics_backup.pkl' file not found in plots/ folder!"
 # ======================================================================
 
-# --- SIDEBAR (Left Side Isolated Space - Fully Dynamic Now) ---
 with st.sidebar:
     st.markdown("## 🔑 System Performance")
     st.markdown("---")
@@ -83,7 +81,7 @@ tab1, tab2, tab3 = st.tabs([
 
 # ==================== TAB 1: EXECUTIVE CONTROL PANEL ====================
 with tab1:
-    # Row 1: Clean Standalone Table View
+
     st.markdown("### 📋 Compiled Model Accuracy Stand")
     metrics_data = {
         "Model Architecture": ["🧠 LSTM Recurrent Network", "🌲 Random Forest Model", "🕸️ Feed-Forward NN (FNN)"],
@@ -93,8 +91,7 @@ with tab1:
     st.table(pd.DataFrame(metrics_data))
     
     st.divider()
-
-    # Row 2: Grid Core Evaluation Chart (Medium Controlled Size)
+    
     st.markdown("### 📉 Live Model Analytics Mapping")
     c_left, c_mid, c_right = st.columns([1, 4, 1])
     with c_mid:
@@ -105,7 +102,6 @@ with tab1:
 
     st.divider()
     
-    # Row 3: Core Validation Sub-Plots
     st.markdown("### 🔬 Live Matrix Diagnostics Breakdown")
     col_diag1, col_diag2 = st.columns(2)
     
@@ -155,7 +151,6 @@ with tab2:
             st.image(str(state_curve_path), use_column_width=True)
 
 # ==================== TAB 3: STRESS TESTING ====================
-# ==================== TAB 3: STRESS TESTING ====================
 with tab3:
     st.subheader("Sensor Anomaly Manipulations & Robustness Checks")
     st.divider()
@@ -176,14 +171,12 @@ with tab3:
         else:
             st.error("⚠️ Partial observability map generation tracing failed.")
 
-    # ======================================================================
-    # 📈 DYNAMIC LIVE STATE ESTIMATION DIAGNOSTICS (YAHAN SE ADD KIYA HAI)
-    # ======================================================================
+    # 📈 DYNAMIC LIVE STATE ESTIMATION DIAGNOSTICS
     st.divider()
     st.markdown("### 📈 Real-Time Power Grid State Estimation Diagnostics")
     st.write("Dynamically tracking measured capacity variations against static baseline filters across core transmission branches.")
 
-    # 1. Generate Runtime Simulated Telemetry Matrix (300 Timesteps)
+    # 1. Generate Runtime Simulated Telemetry Matrix 
     np.random.seed(42)
     timesteps = np.arange(300)
     
@@ -191,13 +184,11 @@ with tab3:
     base_trend_2 = 140 + 15 * np.cos(timesteps / 30) + np.random.normal(0, 3, 300)
     base_trend_3 = 90 + 12 * np.sin(timesteps / 50) + np.random.normal(0, 3, 300)
 
-    # Attack simulation configurations
     base_trend_1[145:205] -= 45
     base_trend_2[145:205] += 30
     base_trend_3[145:205] += 25
     base_trend_2[205:275] -= 20
 
-    # 2. Convert to Pandas DataFrame
     chart_data = pd.DataFrame({
         "Timestep": timesteps,
         "Real Line 1 (Measured Capacity)": base_trend_1,
@@ -208,7 +199,7 @@ with tab3:
         "Predicted Line 3 (Static Baseline)": 96.0
     }).set_index("Timestep")
 
-    # 3. Render 3 Column Layout
+ 
     graph_col1, graph_col2, graph_col3 = st.columns(3)
 
     with graph_col1:
