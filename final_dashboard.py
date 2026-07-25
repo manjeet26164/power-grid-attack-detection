@@ -176,7 +176,6 @@ with tab3:
     st.markdown("### 📈 Real-Time Power Grid State Estimation Diagnostics")
     st.write("Dynamically tracking measured capacity variations against static baseline filters across core transmission branches.")
 
-    # 1. Generate Runtime Simulated Telemetry Matrix 
     np.random.seed(42)
     timesteps = np.arange(300)
     
