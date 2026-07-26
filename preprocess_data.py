@@ -292,6 +292,14 @@ def select_observed_lines(observations: np.ndarray, selected_indices: np.ndarray
 
     return observations[:, selected_indices]
 
+def fit_and_transform_scaler(
+    train_obs: np.ndarray,
+    val_obs: np.ndarray,
+    test_obs: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, MinMaxScaler]:
+    scaler = MinMaxScaler()
+    scaler.fit(train_obs)
+    return scaler.transform(train_obs), scaler.transform(val_obs), scaler.transform(test_obs), scaler
 
 def fit_and_transform_full_state_scaler(
     train_full: np.ndarray,
@@ -476,6 +484,14 @@ def main() -> None:
         train_features = select_observed_lines(train_observations, selected_indices)
         val_features = select_observed_lines(val_observations, selected_indices)
         test_features = select_observed_lines(test_observations, selected_indices)
+        
+        # Step 4: normalize the observed input lines using a scaler fit only on the training split.
+        print("STEP 3 - Applying MinMaxScaler normalization")
+        scaled_train, scaled_val, scaled_test, scaler = fit_and_transform_scaler(
+            train_features,
+            val_features,
+            test_features,
+        )
 
          # Step 4b: separately normalize the FULL state (regression target)
         print("STEP 3b - Normalizing full-state regression targets")

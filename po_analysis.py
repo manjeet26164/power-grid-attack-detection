@@ -39,8 +39,8 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 PLOTS_DIR = BASE_DIR / "plots"
 
-TRAIN_PATH = BASE_DIR / "data_case14_train.pkl"
-TEST_PATH = BASE_DIR / "data_case14_test.pkl"
+TRAIN_PATH = DATA_DIR / "data_case14_train.pkl"
+TEST_PATH = DATA_DIR / "data_case14_test.pkl"
 
 PO_VALUES = [0.1, 0.3, 0.5, 0.6, 0.7, 1.0]
 TOTAL_LINES = 20
@@ -51,6 +51,15 @@ PAPER_REFERENCE_F1 = 0.95
 
 def ensure_output_dir() -> None:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    
+def resolve_data_file(filename: str) -> Path:
+    candidates = [DATA_DIR / filename, BASE_DIR / filename]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "Could not find " + filename + ". Tried: " + ", ".join(str(c) for c in candidates)
+    )
 
 
 def load_pickle_array(path: Path) -> np.ndarray:
@@ -251,8 +260,8 @@ def plot_results(po_values: list[float], mean_scores: list[float], min_scores: l
 def main() -> None:
     ensure_output_dir()
 
-    train_tensor = load_pickle_array(TRAIN_PATH)
-    test_tensor = load_pickle_array(TEST_PATH)
+    train_tensor = load_pickle_array(resolve_data_file("data_case14_train.pkl"))
+    test_tensor = load_pickle_array(resolve_data_file("data_case14_test.pkl"))
 
     train_obs, train_labels = extract_observations_and_labels(train_tensor)
     test_obs, test_labels = extract_observations_and_labels(test_tensor)
