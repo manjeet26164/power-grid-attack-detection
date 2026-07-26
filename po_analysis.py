@@ -45,7 +45,7 @@ TEST_PATH = BASE_DIR / "data_case14_test.pkl"
 PO_VALUES = [0.1, 0.3, 0.5, 0.6, 0.7, 1.0]
 TOTAL_LINES = 20
 SEQUENCE_LENGTH = 5
-RUNS_PER_PO = 1
+RUNS_PER_PO = 5
 PAPER_REFERENCE_F1 = 0.95
 
 
@@ -219,7 +219,7 @@ def evaluate_po_level(
         x_fit,
         y_fit,
         validation_data=(x_val, y_val),
-        epochs=3,
+        epochs=60,
         batch_size=1024,
         callbacks=callbacks,
         verbose=1,

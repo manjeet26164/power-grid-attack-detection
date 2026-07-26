@@ -242,8 +242,8 @@ def evaluate_random_forest(
     search = RandomizedSearchCV(
         estimator=RandomForestClassifier(random_state=42, n_jobs=-1),
         param_distributions=param_distributions,
-        n_iter=2,
-        cv=2,
+        n_iter=12,
+        cv=3,
         scoring="f1",
         random_state=42,
         n_jobs=-1,
@@ -321,7 +321,7 @@ def train_fnn(
         x_train_flat,
         y_train,
         validation_data=(x_val_flat, y_val),
-        epochs=3,
+        epochs=60,
         batch_size=1024,
         callbacks=callbacks,
         class_weight=class_weight,
@@ -419,15 +419,6 @@ def main() -> None:
         print(f"Saved FNN model to: {FNN_MODEL_PATH}")
         
         # === DASHBOARD DYNAMIC METRICS COUPLING SYSTEM ===
-        import pickle
-        from pathlib import Path
-        
-        metrics_to_save = {
-            'lstm_f1': lstm_f1,
-            'rf_f1': rf_f1,
-            'fnn_f1': fnn_f1
-        }
-        
         import pickle
         from pathlib import Path
         

@@ -293,14 +293,18 @@ def select_observed_lines(observations: np.ndarray, selected_indices: np.ndarray
     return observations[:, selected_indices]
 
 
-def fit_and_transform_scaler(
-    train_obs: np.ndarray,
-    val_obs: np.ndarray,
-    test_obs: np.ndarray,
+def fit_and_transform_full_state_scaler(
+    train_full: np.ndarray,
+    val_full: np.ndarray,
+    test_full: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, MinMaxScaler]:
+    """Scale the full 20-line state (the state-estimation regression target)
+    separately from the partially-observed input lines, so the LSTM's
+    regression target lives on the same [0, 1] scale as its input.
+    """
     scaler = MinMaxScaler()
-    scaler.fit(train_obs)
-    return scaler.transform(train_obs), scaler.transform(val_obs), scaler.transform(test_obs), scaler
+    scaler.fit(train_full)
+    return scaler.transform(train_full), scaler.transform(val_full), scaler.transform(test_full), scaler
 
 
 def create_sliding_windows(
@@ -473,36 +477,24 @@ def main() -> None:
         val_features = select_observed_lines(val_observations, selected_indices)
         test_features = select_observed_lines(test_observations, selected_indices)
 
-        # Step 4: normalize using a scaler fit only on the training split.
-        print("STEP 3 - Applying MinMaxScaler normalization")
-        scaled_train, scaled_val, scaled_test, scaler = fit_and_transform_scaler(
-            train_features,
-            val_features,
-            test_features,
+         # Step 4b: separately normalize the FULL state (regression target)
+        print("STEP 3b - Normalizing full-state regression targets")
+        scaled_train_full, scaled_val_full, scaled_test_full, state_scaler = fit_and_transform_full_state_scaler(
+            train_observations,
+            val_observations,
+            test_observations,
         )
 
         # Step 5: build sliding windows for the LSTM input/output pairs.
         print("STEP 4 - Creating sliding window sequences")
         X_train, y_train_occur, y_train_loc, y_train_state = create_sliding_windows(
-            scaled_train,
-            train_occurrence,
-            train_location,
-            train_observations,
-            sequence_length,
+            scaled_train, train_occurrence, train_location, scaled_train_full, sequence_length,
         )
         X_val, y_val_occur, y_val_loc, y_val_state = create_sliding_windows(
-            scaled_val,
-            val_occurrence,
-            val_location,
-            val_observations,
-            sequence_length,
+            scaled_val, val_occurrence, val_location, scaled_val_full, sequence_length,
         )
         X_test, y_test_occur, y_test_loc, y_test_state = create_sliding_windows(
-            scaled_test,
-            test_occurrence,
-            test_location,
-            test_observations,
-            sequence_length,
+            scaled_test, test_occurrence, test_location, scaled_test_full, sequence_length,
         )
 
         # Step 6: save all arrays and the fitted scaler to disk.
@@ -522,6 +514,7 @@ def main() -> None:
         save_array(output_dir / "y_test_state.npy", y_test_state)
         save_array(output_dir / "selected_lines.npy", selected_indices.astype(np.int64))
         save_pickle(output_dir / "scaler.pkl", scaler)
+        save_pickle(output_dir / "state_scaler.pkl", state_scaler)
 
         verify_saved_outputs(
             output_dir,

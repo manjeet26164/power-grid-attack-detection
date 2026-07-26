@@ -322,7 +322,7 @@ def main() -> None:
             y_train=y_train_occur,
             x_val=x_val,
             y_val=y_val_occur,
-            epochs=3,
+            epochs=60,
             batch_size=1024,
             metric_name="accuracy",
             class_weight=occurrence_class_weight,
@@ -337,7 +337,7 @@ def main() -> None:
             y_train=y_train_loc,
             x_val=x_val,
             y_val=y_val_loc,
-            epochs=3,
+            epochs=60,
             batch_size=1024,
             metric_name="accuracy",
         )
@@ -351,7 +351,7 @@ def main() -> None:
             y_train=y_train_state,
             x_val=x_val,
             y_val=y_val_state,
-            epochs=3,
+            epochs=60,
             batch_size=1024,
             metric_name="mae",
         )
