@@ -1,5 +1,16 @@
-﻿data/
-plots/
+﻿# Python
 __pycache__/
-.venv/
+*.pyc
+env/
+venv/
+
+# Data & models
+data/
+models/
+plots/
 *.pkl
+*.h5
+
+# OS/editor
+.DS_Store
+.vscode/
