@@ -1,51 +1,43 @@
 from __future__ import annotations
 
 import json
-import pickle
-import importlib
 import time
 from pathlib import Path
-from typing import Any, Callable
-
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: matplotlib is required to run train_models.py. Install it and try again."
-    ) from exc
+from typing import Any
 
 try:
     import numpy as np
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: numpy is required to run train_models.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: numpy is required to run train_models.py. Install it and try again.") from exc
 
 try:
-    import tensorflow as tf
+    import torch
+    import torch.nn as nn
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: tensorflow is required to run train_models.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: torch is required to run train_models.py. Install it and try again.") from exc
 
+from build_lstm_model import (
+    build_attack_occurrence_model,
+    build_attack_location_model,
+    build_state_estimation_model,
+)
+from train_utils import (
+    EarlyStopping,
+    get_device,
+    iterate_minibatches,
+    plot_training_history,
+    report_best_scores,
+    save_checkpoint,
+)
 
 DATA_DIR = Path("data/preprocessed")
 MODELS_DIR = Path("models")
 PLOTS_DIR = Path("plots")
 
-MODEL_JSONS = {
-    "occurrence": MODELS_DIR / "attack_occurrence_model.json",
-    "location": MODELS_DIR / "attack_location_model.json",
-    "state": MODELS_DIR / "state_estimation_model.json",
-}
-
 MODEL_CHECKPOINTS = {
-    "occurrence": MODELS_DIR / "best_occurrence_model.h5",
-    "location": MODELS_DIR / "best_location_model.h5",
-    "state": MODELS_DIR / "best_state_model.h5",
+    "occurrence": MODELS_DIR / "best_occurrence_model.pt",
+    "location": MODELS_DIR / "best_location_model.pt",
+    "state": MODELS_DIR / "best_state_model.pt",
 }
 
 
@@ -53,77 +45,6 @@ def load_numpy_array(path: Path) -> np.ndarray:
     if not path.exists():
         raise FileNotFoundError(f"Missing required preprocessed file: {path}")
     return np.load(path, allow_pickle=False)
-
-
-def load_pickle_file(path: Path) -> Any:
-    if not path.exists():
-        raise FileNotFoundError(f"Missing required pickle file: {path}")
-    with path.open("rb") as file_handle:
-        return pickle.load(file_handle)
-
-
-def ensure_model_files_exist() -> None:
-    missing = [str(path) for path in MODEL_JSONS.values() if not path.exists()]
-    if missing:
-        print("Model architecture files are missing. Generating them now from build_lstm_model.py...")
-        build_module = importlib.import_module("build_lstm_model")
-
-        generators: dict[str, Callable[[], tf.keras.Model]] = {
-            "occurrence": build_module.build_attack_occurrence_model,
-            "location": build_module.build_attack_location_model,
-            "state": build_module.build_state_estimation_model,
-        }
-
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        for model_name, json_path in MODEL_JSONS.items():
-            model = generators[model_name]()
-            json_path.write_text(model.to_json(indent=2), encoding="utf-8")
-            print(f"Saved model architecture to: {json_path}")
-
-    remaining_missing = [str(path) for path in MODEL_JSONS.values() if not path.exists()]
-    if remaining_missing:
-        raise FileNotFoundError(
-            "Missing model architecture file(s): "
-            + ", ".join(remaining_missing)
-            + ". Model generation failed."
-        )
-
-
-def load_model_from_json(json_path: Path) -> tf.keras.Model:
-    with json_path.open("r", encoding="utf-8") as file_handle:
-        model_json = file_handle.read()
-    return tf.keras.models.model_from_json(model_json)
-
-
-def compile_occurrence_model(model: tf.keras.Model) -> tf.keras.Model:
-    model.compile(
-        optimizer="adam",
-        loss="binary_crossentropy",
-        metrics=[
-            tf.keras.metrics.BinaryAccuracy(name="accuracy"),
-            tf.keras.metrics.Precision(name="precision"),
-            tf.keras.metrics.Recall(name="recall"),
-        ],
-    )
-    return model
-
-
-def compile_location_model(model: tf.keras.Model) -> tf.keras.Model:
-    model.compile(
-        optimizer="adam",
-        loss="sparse_categorical_crossentropy",
-        metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")],
-    )
-    return model
-
-
-def compile_state_model(model: tf.keras.Model) -> tf.keras.Model:
-    model.compile(
-        optimizer="adam",
-        loss="mse",
-        metrics=[tf.keras.metrics.MeanAbsoluteError(name="mae")],
-    )
-    return model
 
 
 def compute_binary_class_weight(labels: np.ndarray) -> dict[int, float]:
@@ -134,140 +55,94 @@ def compute_binary_class_weight(labels: np.ndarray) -> dict[int, float]:
     unique_classes, counts = np.unique(flattened, return_counts=True)
     total = flattened.size
     class_weight: dict[int, float] = {}
-    for class_value, count in zip(unique_classes, counts, strict=False):
-        if count <= 0:
-            raise ValueError(f"Invalid class count for label {class_value}: {count}")
+    for class_value, count in zip(unique_classes, counts):
         class_weight[int(class_value)] = float(total / (len(unique_classes) * count))
-
     for class_value in (0, 1):
         class_weight.setdefault(class_value, 1.0)
-
     return class_weight
-
-
-def build_callbacks(model_name: str) -> list[tf.keras.callbacks.Callback]:
-    checkpoint_path = MODEL_CHECKPOINTS[model_name]
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-
-    return [
-        tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss",
-            patience=10,
-            restore_best_weights=True,
-            verbose=1,
-        ),
-        tf.keras.callbacks.ModelCheckpoint(
-            filepath=str(checkpoint_path),
-            monitor="val_loss",
-            save_best_only=True,
-            save_weights_only=False,
-            verbose=1,
-        ),
-        tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss",
-            factor=0.5,
-            patience=5,
-            verbose=1,
-            min_lr=1e-6,
-        ),
-    ]
-
-
-def plot_training_history(history: tf.keras.callbacks.History, model_name: str, metric_name: str) -> Path:
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    figure_path = PLOTS_DIR / f"{model_name}_training_curves.png"
-
-    history_dict = history.history
-    epochs = range(1, len(history_dict["loss"]) + 1)
-
-    figure, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-    axes[0].plot(epochs, history_dict["loss"], label="Training loss", color="tab:blue")
-    axes[0].plot(epochs, history_dict["val_loss"], label="Validation loss", color="tab:orange")
-    axes[0].set_title(f"{model_name.replace('_', ' ').title()} Loss")
-    axes[0].set_xlabel("Epoch")
-    axes[0].set_ylabel("Loss")
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.25)
-
-    metric_key = metric_name
-    val_metric_key = f"val_{metric_name}"
-    if metric_key in history_dict and val_metric_key in history_dict:
-        axes[1].plot(epochs, history_dict[metric_key], label=f"Training {metric_name}", color="tab:green")
-        axes[1].plot(epochs, history_dict[val_metric_key], label=f"Validation {metric_name}", color="tab:red")
-        axes[1].set_title(f"{model_name.replace('_', ' ').title()} {metric_name.upper()}")
-        axes[1].set_xlabel("Epoch")
-        axes[1].set_ylabel(metric_name.upper())
-        axes[1].legend()
-        axes[1].grid(True, alpha=0.25)
-    else:
-        axes[1].axis("off")
-        axes[1].text(0.5, 0.5, f"Metric '{metric_name}' not available", ha="center", va="center")
-
-    figure.tight_layout()
-    figure.savefig(figure_path, dpi=200, bbox_inches="tight")
-    plt.close(figure)
-    return figure_path
-
-
-def report_best_scores(history: tf.keras.callbacks.History, metric_name: str) -> tuple[int, float, float | None]:
-    history_dict = history.history
-    val_loss = history_dict.get("val_loss")
-    if not val_loss:
-        raise ValueError("Training history does not contain validation loss values.")
-
-    best_epoch_index = int(np.argmin(val_loss))
-    best_epoch = best_epoch_index + 1
-    best_val_loss = float(val_loss[best_epoch_index])
-
-    secondary_metric = history_dict.get(f"val_{metric_name}")
-    best_secondary = None
-    if secondary_metric:
-        if metric_name == "mae":
-            best_secondary = float(np.min(secondary_metric))
-        else:
-            best_secondary = float(np.max(secondary_metric))
-
-    return best_epoch, best_val_loss, best_secondary
 
 
 def train_model(
     model_name: str,
-    model: tf.keras.Model,
-    x_train: np.ndarray,
-    y_train: np.ndarray,
-    x_val: np.ndarray,
-    y_val: np.ndarray,
+    model: nn.Module,
+    x_train: "torch.Tensor",
+    y_train: "torch.Tensor",
+    x_val: "torch.Tensor",
+    y_val: "torch.Tensor",
     epochs: int,
     batch_size: int,
     metric_name: str,
-    class_weight: dict[int, float] | None = None,
-) -> tf.keras.callbacks.History:
+    loss_fn,
+    metric_fn,
+    device: "torch.device",
+    checkpoint_path: Path,
+    input_dim: int,
+) -> dict[str, list[float]]:
     print(f"\n=== Training {model_name.replace('_', ' ').title()} ===")
     print(f"Training samples: {x_train.shape[0]}")
     print(f"Validation samples: {x_val.shape[0]}")
-    if class_weight is not None:
-        print(f"Class weights: {json.dumps(class_weight, sort_keys=True)}")
 
-    callbacks = build_callbacks(model_name)
+    model.to(device)
+    optimizer = torch.optim.Adam(model.parameters())
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
+    )
+    early_stopping = EarlyStopping(patience=10)
+
+    history: dict[str, list[float]] = {"loss": [], "val_loss": [], metric_name: [], f"val_{metric_name}": []}
+
+    x_val_dev = x_val.to(device)
+    y_val_dev = y_val.to(device)
+
     start_time = time.perf_counter()
+    for epoch in range(1, epochs + 1):
+        model.train()
+        running_loss = 0.0
+        running_metric = 0.0
+        n_batches = 0
 
-    fit_kwargs: dict[str, Any] = {
-        "x": x_train,
-        "y": y_train,
-        "validation_data": (x_val, y_val),
-        "epochs": epochs,
-        "batch_size": batch_size,
-        "callbacks": callbacks,
-        "verbose": 1,
-    }
-    if class_weight is not None:
-        fit_kwargs["class_weight"] = class_weight
+        for xb, yb in iterate_minibatches(x_train, y_train, batch_size, shuffle=True):
+            xb, yb = xb.to(device), yb.to(device)
+            optimizer.zero_grad()
+            preds = model(xb)
+            loss = loss_fn(preds, yb)
+            loss.backward()
+            optimizer.step()
 
-    history = model.fit(**fit_kwargs)
+            running_loss += loss.item()
+            running_metric += metric_fn(preds.detach(), yb)
+            n_batches += 1
 
+        train_loss = running_loss / max(1, n_batches)
+        train_metric = running_metric / max(1, n_batches)
+
+        model.eval()
+        with torch.no_grad():
+            val_preds = model(x_val_dev)
+            val_loss = loss_fn(val_preds, y_val_dev).item()
+            val_metric = metric_fn(val_preds, y_val_dev)
+
+        history["loss"].append(train_loss)
+        history["val_loss"].append(val_loss)
+        history[metric_name].append(train_metric)
+        history[f"val_{metric_name}"].append(val_metric)
+
+        scheduler.step(val_loss)
+        print(
+            f"Epoch {epoch}/{epochs} - loss: {train_loss:.4f} - {metric_name}: {train_metric:.4f} "
+            f"- val_loss: {val_loss:.4f} - val_{metric_name}: {val_metric:.4f}"
+        )
+
+        if early_stopping.step(val_loss, model, epoch):
+            print(f"Early stopping at epoch {epoch} (best val_loss={early_stopping.best_loss:.4f})")
+            break
+
+    early_stopping.restore_best_weights(model)
     elapsed_seconds = time.perf_counter() - start_time
     print(f"Training time for {model_name.replace('_', ' ').title()}: {elapsed_seconds:.2f} seconds")
+
+    save_checkpoint(model, input_dim, {"model_type": model_name}, checkpoint_path)
+    print(f"Saved best checkpoint to: {checkpoint_path}")
 
     best_epoch, best_val_loss, best_secondary = report_best_scores(history, metric_name)
     print(f"Best epoch for {model_name.replace('_', ' ').title()}: {best_epoch}")
@@ -275,85 +150,136 @@ def train_model(
     if best_secondary is not None:
         print(f"Best validation {metric_name} for {model_name.replace('_', ' ').title()}: {best_secondary:.6f}")
 
-    plot_path = plot_training_history(history, model_name, metric_name)
+    plot_path = plot_training_history(history, model_name, metric_name, PLOTS_DIR)
     print(f"Saved training curves to: {plot_path}")
 
     return history
 
 
+# ---- metric functions (numpy-free, operate on torch tensors, return python floats) ----
+
+def binary_accuracy(logits: "torch.Tensor", targets: "torch.Tensor") -> float:
+    preds = (torch.sigmoid(logits) >= 0.5).float()
+    return float((preds == targets).float().mean().item())
+
+
+def sparse_categorical_accuracy(logits: "torch.Tensor", targets: "torch.Tensor") -> float:
+    preds = torch.argmax(logits, dim=-1)
+    return float((preds == targets).float().mean().item())
+
+
+def mean_absolute_error(preds: "torch.Tensor", targets: "torch.Tensor") -> float:
+    return float(torch.mean(torch.abs(preds - targets)).item())
+
+
 def main() -> None:
     try:
+        device = get_device()
+        print(f"Using device: {device}")
+
         print("Loading preprocessed arrays...")
         x_train = load_numpy_array(DATA_DIR / "X_train.npy")
         x_val = load_numpy_array(DATA_DIR / "X_val.npy")
-        x_test = load_numpy_array(DATA_DIR / "X_test.npy")
 
         y_train_occur = load_numpy_array(DATA_DIR / "y_train_occur.npy")
         y_val_occur = load_numpy_array(DATA_DIR / "y_val_occur.npy")
-        y_test_occur = load_numpy_array(DATA_DIR / "y_test_occur.npy")
 
         y_train_loc = load_numpy_array(DATA_DIR / "y_train_loc.npy")
         y_val_loc = load_numpy_array(DATA_DIR / "y_val_loc.npy")
-        y_test_loc = load_numpy_array(DATA_DIR / "y_test_loc.npy")
 
         y_train_state = load_numpy_array(DATA_DIR / "y_train_state.npy")
         y_val_state = load_numpy_array(DATA_DIR / "y_val_state.npy")
-        y_test_state = load_numpy_array(DATA_DIR / "y_test_state.npy")
 
         print(f"X_train shape: {x_train.shape}")
         print(f"X_val shape: {x_val.shape}")
-        print(f"X_test shape: {x_test.shape}")
 
-        print("Checking model architecture files...")
-        ensure_model_files_exist()
+        input_dim = x_train.shape[2]
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-        print("Loading model architectures from JSON files...")
-        occurrence_model = compile_occurrence_model(load_model_from_json(MODEL_JSONS["occurrence"]))
-        location_model = compile_location_model(load_model_from_json(MODEL_JSONS["location"]))
-        state_model = compile_state_model(load_model_from_json(MODEL_JSONS["state"]))
+        x_train_t = torch.from_numpy(x_train).float()
+        x_val_t = torch.from_numpy(x_val).float()
 
+        # --- Model 1: Attack Occurrence Detection ---
         print("Model 1: Attack Occurrence Detection")
-        occurrence_model.summary()
-        occurrence_class_weight = compute_binary_class_weight(y_train_occur)
+        occurrence_model = build_attack_occurrence_model(input_dim)
+        print(occurrence_model)
+
+        class_weight = compute_binary_class_weight(y_train_occur)
+        print(f"Class weights: {json.dumps(class_weight, sort_keys=True)}")
+        # pos_weight rebalances the positive class the same way Keras' class_weight does.
+        pos_weight = torch.tensor([class_weight[1] / class_weight[0]], dtype=torch.float32).to(device)
+        occurrence_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+        y_train_occur_t = torch.from_numpy(y_train_occur).float().reshape(-1)
+        y_val_occur_t = torch.from_numpy(y_val_occur).float().reshape(-1)
+
         train_model(
             model_name="occurrence",
             model=occurrence_model,
-            x_train=x_train,
-            y_train=y_train_occur,
-            x_val=x_val,
-            y_val=y_val_occur,
+            x_train=x_train_t,
+            y_train=y_train_occur_t,
+            x_val=x_val_t,
+            y_val=y_val_occur_t,
             epochs=60,
-            batch_size=1024,
+            batch_size=512,
             metric_name="accuracy",
-            class_weight=occurrence_class_weight,
+            loss_fn=occurrence_loss,
+            metric_fn=binary_accuracy,
+            device=device,
+            checkpoint_path=MODEL_CHECKPOINTS["occurrence"],
+            input_dim=input_dim,
         )
 
+        # --- Model 2: Attack Location Detection ---
         print("Model 2: Attack Location Detection")
-        location_model.summary()
+        location_model = build_attack_location_model(input_dim)
+        print(location_model)
+
+        location_loss = nn.CrossEntropyLoss()
+        y_train_loc_t = torch.from_numpy(y_train_loc).long().reshape(-1)
+        y_val_loc_t = torch.from_numpy(y_val_loc).long().reshape(-1)
+
         train_model(
             model_name="location",
             model=location_model,
-            x_train=x_train,
-            y_train=y_train_loc,
-            x_val=x_val,
-            y_val=y_val_loc,
+            x_train=x_train_t,
+            y_train=y_train_loc_t,
+            x_val=x_val_t,
+            y_val=y_val_loc_t,
             epochs=60,
-            batch_size=1024,
+            batch_size=512,
             metric_name="accuracy",
+            loss_fn=location_loss,
+            metric_fn=sparse_categorical_accuracy,
+            device=device,
+            checkpoint_path=MODEL_CHECKPOINTS["location"],
+            input_dim=input_dim,
         )
 
+        # --- Model 3: State Estimation ---
         print("Model 3: State Estimation")
-        state_model.summary()
+        state_model = build_state_estimation_model(input_dim, output_dim=y_train_state.shape[1])
+        print(state_model)
+
+        state_loss = nn.MSELoss()
+        y_train_state_t = torch.from_numpy(y_train_state).float()
+        y_val_state_t = torch.from_numpy(y_val_state).float()
+
         train_model(
             model_name="state",
             model=state_model,
-            x_train=x_train,
-            y_train=y_train_state,
-            x_val=x_val,
-            y_val=y_val_state,
+            x_train=x_train_t,
+            y_train=y_train_state_t,
+            x_val=x_val_t,
+            y_val=y_val_state_t,
             epochs=60,
-            batch_size=1024,
+            batch_size=512,
             metric_name="mae",
+            loss_fn=state_loss,
+            metric_fn=mean_absolute_error,
+            device=device,
+            checkpoint_path=MODEL_CHECKPOINTS["state"],
+            input_dim=input_dim,
         )
 
         print("\nTraining completed successfully.")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from pathlib import Path
 
 try:
@@ -8,39 +9,30 @@ try:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: matplotlib is required to run po_analysis.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: matplotlib is required to run po_analysis.py. Install it and try again.") from exc
 
 try:
     import numpy as np
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: numpy is required to run po_analysis.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: numpy is required to run po_analysis.py. Install it and try again.") from exc
 
 try:
     from sklearn.metrics import f1_score
     from sklearn.preprocessing import MinMaxScaler
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: scikit-learn is required to run po_analysis.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: scikit-learn is required to run po_analysis.py. Install it and try again.") from exc
 
 try:
-    import tensorflow as tf
+    import torch
+    import torch.nn as nn
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: tensorflow is required to run po_analysis.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: torch is required to run po_analysis.py. Install it and try again.") from exc
 
+from train_utils import EarlyStopping, get_device, iterate_minibatches
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 PLOTS_DIR = BASE_DIR / "plots"
-
-TRAIN_PATH = DATA_DIR / "data_case14_train.pkl"
-TEST_PATH = DATA_DIR / "data_case14_test.pkl"
 
 PO_VALUES = [0.1, 0.3, 0.5, 0.6, 0.7, 1.0]
 TOTAL_LINES = 20
@@ -51,22 +43,19 @@ PAPER_REFERENCE_F1 = 0.95
 
 def ensure_output_dir() -> None:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    
+
+
 def resolve_data_file(filename: str) -> Path:
     candidates = [DATA_DIR / filename, BASE_DIR / filename]
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    raise FileNotFoundError(
-        "Could not find " + filename + ". Tried: " + ", ".join(str(c) for c in candidates)
-    )
+    raise FileNotFoundError("Could not find " + filename + ". Tried: " + ", ".join(str(c) for c in candidates))
 
 
 def load_pickle_array(path: Path) -> np.ndarray:
     if not path.exists():
         raise FileNotFoundError(f"Missing required file: {path}")
-    import pickle
-
     with path.open("rb") as file_handle:
         data = pickle.load(file_handle)
     return np.asarray(data)
@@ -75,7 +64,6 @@ def load_pickle_array(path: Path) -> np.ndarray:
 def choose_capacity_channel(tensor: np.ndarray) -> int:
     if tensor.ndim != 3:
         raise ValueError(f"Expected a 3D tensor, got shape {tensor.shape}")
-
     for index in range(tensor.shape[2] - 1, -1, -1):
         channel = np.asarray(tensor[:, :, index])
         flattened = channel.reshape(-1)
@@ -86,32 +74,27 @@ def choose_capacity_channel(tensor: np.ndarray) -> int:
             continue
         if float(np.nanmin(channel)) >= 0 and float(np.nanmean(channel)) >= 1:
             return index
-
     for index in range(tensor.shape[2]):
         channel = np.asarray(tensor[:, :, index])
         if not np.allclose(channel, 0):
             return index
-
     raise ValueError("Could not identify a usable capacity channel in the tensor.")
 
 
 def choose_attack_channel(tensor: np.ndarray) -> int:
     if tensor.ndim != 3:
         raise ValueError(f"Expected a 3D tensor, got shape {tensor.shape}")
-
     for index in range(tensor.shape[2] - 1, -1, -1):
         channel = np.asarray(tensor[:, :, index])
         unique_values = np.unique(channel.reshape(-1))
         if np.all(np.isin(unique_values, [0, 1, False, True])):
             return index
-
     raise ValueError("Could not identify a binary attack channel in the tensor.")
 
 
 def extract_observations_and_labels(tensor: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     if tensor.ndim != 3:
         raise ValueError(f"Expected a 3D tensor, got shape {tensor.shape}")
-
     if tensor.shape[1] != TOTAL_LINES:
         raise ValueError(f"Expected {TOTAL_LINES} transmission lines, got shape {tensor.shape}")
 
@@ -139,18 +122,13 @@ def fit_and_transform_scaler(train_obs: np.ndarray, test_obs: np.ndarray) -> tup
 def create_sliding_windows(features: np.ndarray, occurrence: np.ndarray, sequence_length: int) -> tuple[np.ndarray, np.ndarray]:
     if sequence_length <= 0:
         raise ValueError("Sequence length must be positive.")
-
     if features.shape[0] != occurrence.shape[0]:
         raise ValueError("Features and labels must have the same number of timesteps.")
-
     if features.shape[0] < sequence_length:
-        raise ValueError(
-            f"Not enough timesteps to build sequences of length {sequence_length}: got {features.shape[0]}."
-        )
+        raise ValueError(f"Not enough timesteps to build sequences of length {sequence_length}: got {features.shape[0]}.")
 
     sequences: list[np.ndarray] = []
     targets: list[int] = []
-
     for current_index in range(sequence_length - 1, features.shape[0]):
         start_index = current_index - sequence_length + 1
         sequences.append(features[start_index : current_index + 1])
@@ -159,30 +137,28 @@ def create_sliding_windows(features: np.ndarray, occurrence: np.ndarray, sequenc
     return np.asarray(sequences, dtype=np.float32), np.asarray(targets, dtype=np.int64)
 
 
-def build_occurrence_lstm(input_shape: tuple[int, int]) -> tf.keras.Model:
-    model = tf.keras.Sequential(
-        [
-            tf.keras.layers.Input(shape=input_shape, name="input_sequence"),
-            tf.keras.layers.LSTM(128, return_sequences=True, name="lstm_128"),
-            tf.keras.layers.Dropout(0.2, name="dropout_1"),
-            tf.keras.layers.LSTM(64, return_sequences=False, name="lstm_64"),
-            tf.keras.layers.Dropout(0.2, name="dropout_2"),
-            tf.keras.layers.Dense(16, activation="relu", name="dense_16"),
-            tf.keras.layers.Dropout(0.2, name="dropout_3"),
-            tf.keras.layers.Dense(1, activation="sigmoid", name="occurrence_output"),
-        ],
-        name="po_occurrence_lstm",
-    )
-    model.compile(
-        optimizer="adam",
-        loss="binary_crossentropy",
-        metrics=[
-            tf.keras.metrics.BinaryAccuracy(name="accuracy"),
-            tf.keras.metrics.Precision(name="precision"),
-            tf.keras.metrics.Recall(name="recall"),
-        ],
-    )
-    return model
+class POOccurrenceLSTM(nn.Module):
+    """Same architecture as the main occurrence model, sized per-Po (input_dim varies)."""
+
+    def __init__(self, input_dim: int) -> None:
+        super().__init__()
+        self.lstm_128 = nn.LSTM(input_size=input_dim, hidden_size=128, batch_first=True)
+        self.dropout_1 = nn.Dropout(0.2)
+        self.lstm_64 = nn.LSTM(input_size=128, hidden_size=64, batch_first=True)
+        self.dropout_2 = nn.Dropout(0.2)
+        self.dense_16 = nn.Linear(64, 16)
+        self.relu = nn.ReLU()
+        self.dropout_3 = nn.Dropout(0.2)
+        self.occurrence_output = nn.Linear(16, 1)
+
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        out, _ = self.lstm_128(x)
+        out = self.dropout_1(out)
+        out, (h_n, _) = self.lstm_64(out)
+        out = self.dropout_2(h_n[-1])
+        out = self.relu(self.dense_16(out))
+        out = self.dropout_3(out)
+        return self.occurrence_output(out).squeeze(-1)
 
 
 def evaluate_po_level(
@@ -192,6 +168,7 @@ def evaluate_po_level(
     test_labels: np.ndarray,
     po_value: float,
     run_index: int,
+    device: "torch.device",
 ) -> float:
     n_observed = int(TOTAL_LINES * po_value)
     n_observed = max(1, min(TOTAL_LINES, n_observed))
@@ -208,50 +185,58 @@ def evaluate_po_level(
     x_train, y_train = create_sliding_windows(train_scaled, train_labels, SEQUENCE_LENGTH)
     x_test, y_test = create_sliding_windows(test_scaled, test_labels, SEQUENCE_LENGTH)
 
-    model = build_occurrence_lstm((SEQUENCE_LENGTH, n_observed))
-    callbacks = [
-        tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss",
-            patience=8,
-            restore_best_weights=True,
-            verbose=0,
-        )
-    ]
-
     validation_size = max(1, int(0.2 * x_train.shape[0]))
     x_val = x_train[-validation_size:]
     y_val = y_train[-validation_size:]
     x_fit = x_train[:-validation_size] if x_train.shape[0] > validation_size else x_train
     y_fit = y_train[:-validation_size] if y_train.shape[0] > validation_size else y_train
 
-    model.fit(
-        x_fit,
-        y_fit,
-        validation_data=(x_val, y_val),
-        epochs=60,
-        batch_size=1024,
-        callbacks=callbacks,
-        verbose=1,
-    )
+    model = POOccurrenceLSTM(n_observed).to(device)
+    loss_fn = nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.Adam(model.parameters())
+    early_stopping = EarlyStopping(patience=8)
 
-    probabilities = np.asarray(model.predict(x_test, verbose=0)).reshape(-1)
+    x_fit_t = torch.from_numpy(x_fit).float()
+    y_fit_t = torch.from_numpy(y_fit).float()
+    x_val_t = torch.from_numpy(x_val).float().to(device)
+    y_val_t = torch.from_numpy(y_val).float().to(device)
+
+    for epoch in range(1, 61):
+        model.train()
+        for xb, yb in iterate_minibatches(x_fit_t, y_fit_t, 1024, shuffle=True):
+            xb, yb = xb.to(device), yb.to(device)
+            optimizer.zero_grad()
+            loss = loss_fn(model(xb), yb)
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            val_loss = loss_fn(model(x_val_t), y_val_t).item()
+        print(f"Po={po_value} run={run_index} epoch={epoch}/60 val_loss={val_loss:.4f}")
+
+        if early_stopping.step(val_loss, model, epoch):
+            break
+
+    early_stopping.restore_best_weights(model)
+
+    model.eval()
+    with torch.no_grad():
+        probabilities = torch.sigmoid(model(torch.from_numpy(x_test).float().to(device))).cpu().numpy().reshape(-1)
     predictions = (probabilities >= 0.5).astype(int)
     return float(f1_score(y_test, predictions, zero_division=0))
 
 
 def plot_results(po_values: list[float], mean_scores: list[float], min_scores: list[float], max_scores: list[float]) -> None:
     figure, axis = plt.subplots(figsize=(10, 6))
-
     axis.plot(po_values, mean_scores, marker="o", linewidth=2.0, color="tab:blue", label="Mean F1")
     axis.fill_between(po_values, min_scores, max_scores, color="tab:blue", alpha=0.18, label="Min-Max Range")
     axis.axhline(PAPER_REFERENCE_F1, color="tab:red", linestyle="--", linewidth=1.8, label="Paper Result")
-
     axis.set_xlabel("Po")
     axis.set_ylabel("F1 Score")
     axis.set_title("Effect of Partial Observations on Performance")
     axis.grid(True, which="both", linestyle="--", alpha=0.35)
     axis.legend()
-
     figure.tight_layout()
     figure.savefig(PLOTS_DIR / "po_analysis.png", dpi=200, bbox_inches="tight")
     plt.close(figure)
@@ -259,6 +244,8 @@ def plot_results(po_values: list[float], mean_scores: list[float], min_scores: l
 
 def main() -> None:
     ensure_output_dir()
+    device = get_device()
+    print(f"Using device: {device}")
 
     train_tensor = load_pickle_array(resolve_data_file("data_case14_train.pkl"))
     test_tensor = load_pickle_array(resolve_data_file("data_case14_test.pkl"))
@@ -274,14 +261,7 @@ def main() -> None:
     for po_value in PO_VALUES:
         run_scores: list[float] = []
         for run_index in range(RUNS_PER_PO):
-            score = evaluate_po_level(
-                train_obs=train_obs,
-                train_labels=train_labels,
-                test_obs=test_obs,
-                test_labels=test_labels,
-                po_value=po_value,
-                run_index=run_index,
-            )
+            score = evaluate_po_level(train_obs, train_labels, test_obs, test_labels, po_value, run_index, device)
             run_scores.append(score)
 
         result_row = {

@@ -1,45 +1,54 @@
-from importlib import import_module
+from __future__ import annotations
+
+import importlib
+import sys
 
 
-def print_version(name, version):
-    print(f"{name}: {version}")
+REQUIRED_PACKAGES = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "sklearn",
+    "torch",
+    "streamlit",
+]
 
 
-def load_package(name):
+def main() -> None:
+    print(f"Python version: {sys.version}")
+    print()
+
+    missing = []
+    for package_name in REQUIRED_PACKAGES:
+        try:
+            module = importlib.import_module(package_name)
+            version = getattr(module, "__version__", "unknown")
+            print(f"[OK] {package_name} ({version})")
+        except ModuleNotFoundError:
+            print(f"[MISSING] {package_name}")
+            missing.append(package_name)
+
+    print()
     try:
-        module = import_module(name)
-        version = getattr(module, "__version__", "unknown")
-        return module, version
-    except ModuleNotFoundError:
-        return None, "not installed"
+        import torch
 
-
-def main():
-    tensorflow, tensorflow_version = load_package("tensorflow")
-    numpy, numpy_version = load_package("numpy")
-    pandas, pandas_version = load_package("pandas")
-    matplotlib, matplotlib_version = load_package("matplotlib")
-    seaborn, seaborn_version = load_package("seaborn")
-    sklearn, sklearn_version = load_package("sklearn")
-
-    print_version("tensorflow", tensorflow_version)
-    print_version("numpy", numpy_version)
-    print_version("pandas", pandas_version)
-    print_version("matplotlib", matplotlib_version)
-    print_version("seaborn", seaborn_version)
-    print_version("sklearn", sklearn_version)
-
-    if tensorflow is not None:
-        gpus = tensorflow.config.list_physical_devices("GPU")
-        if gpus:
-            print("GPU available: Yes")
-            print(f"GPU Name: {gpus[0].name}")
+        cuda_available = torch.cuda.is_available()
+        print(f"CUDA available: {cuda_available}")
+        if cuda_available:
+            print(f"GPU device: {torch.cuda.get_device_name(0)}")
         else:
-            print("GPU available: No")
-    else:
-        print("GPU available: Unknown (tensorflow not installed)")
+            print("Running on CPU. For GPU acceleration on Windows, install the CUDA build of")
+            print("PyTorch, e.g.: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+    except ModuleNotFoundError:
+        pass
 
-    print("SETUP COMPLETE")
+    if missing:
+        print(f"\nMissing packages: {', '.join(missing)}")
+        print("Install them with: pip install -r requirements.txt")
+        raise SystemExit(1)
+
+    print("\nAll required packages are installed.")
 
 
 if __name__ == "__main__":

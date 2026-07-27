@@ -3,122 +3,148 @@ from __future__ import annotations
 from pathlib import Path
 
 try:
-    import tensorflow as tf
+    import torch
+    import torch.nn as nn
 except ModuleNotFoundError as exc:
     raise SystemExit(
-        "ERROR: tensorflow is required to run build_lstm_model.py. Install it and try again."
+        "ERROR: torch is required to run build_lstm_model.py. Install it and try again."
     ) from exc
 
 
-INPUT_SHAPE = (5, 6)
 MODELS_DIR = Path("models")
 
 
-def build_shared_lstm_backbone() -> tf.keras.Sequential:
-    """Create the shared recurrent stack used by all three tasks.
+class SharedLSTMBackbone(nn.Module):
+    """Shared recurrent stack used by all three tasks.
 
     The first LSTM returns the full sequence so the second LSTM can learn
     temporal refinements on top of the intermediate representation.
     Dropout is used after each recurrent block to reduce overfitting.
+    Mirrors the Keras backbone: LSTM(128, return_sequences=True) -> Dropout(0.2)
+    -> LSTM(64, return_sequences=False) -> Dropout(0.2)
     """
 
-    model = tf.keras.Sequential(name="shared_lstm_backbone")
+    def __init__(self, input_dim: int) -> None:
+        super().__init__()
+        self.lstm_128 = nn.LSTM(input_size=input_dim, hidden_size=128, batch_first=True)
+        self.dropout_1 = nn.Dropout(0.2)
+        self.lstm_64 = nn.LSTM(input_size=128, hidden_size=64, batch_first=True)
+        self.dropout_2 = nn.Dropout(0.2)
 
-    model.add(tf.keras.layers.Input(shape=INPUT_SHAPE, name="input_sequence"))
-
-    model.add(tf.keras.layers.LSTM(128, return_sequences=True, name="lstm_128"))
-    model.add(tf.keras.layers.Dropout(0.2, name="dropout_1"))
-    model.add(tf.keras.layers.LSTM(64, return_sequences=False, name="lstm_64"))
-    model.add(tf.keras.layers.Dropout(0.2, name="dropout_2"))
-
-    return model
-
-
-def build_attack_occurrence_model() -> tf.keras.Model:
-    backbone = build_shared_lstm_backbone()
-
-    # Compact dense projection before the binary decision boundary.
-    backbone.add(tf.keras.layers.Dense(16, activation="relu", name="dense_16"))
-    backbone.add(tf.keras.layers.Dropout(0.2, name="dropout_3"))
-
-    # Sigmoid outputs the probability that an attack is occurring.
-    backbone.add(tf.keras.layers.Dense(1, activation="sigmoid", name="occurrence_output"))
-
-    backbone.compile(
-        optimizer="adam",
-        loss="binary_crossentropy",
-        metrics=[
-            tf.keras.metrics.BinaryAccuracy(name="accuracy"),
-            tf.keras.metrics.Precision(name="precision"),
-            tf.keras.metrics.Recall(name="recall"),
-        ],
-    )
-    return backbone
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        out, _ = self.lstm_128(x)
+        out = self.dropout_1(out)
+        out, (h_n, _) = self.lstm_64(out)
+        # h_n[-1] is the final hidden state of lstm_64, equivalent to
+        # Keras' return_sequences=False output (last timestep).
+        out = h_n[-1]
+        out = self.dropout_2(out)
+        return out
 
 
-def build_attack_location_model() -> tf.keras.Model:
-    backbone = build_shared_lstm_backbone()
+class AttackOccurrenceModel(nn.Module):
+    """MODEL 1 - binary attack occurrence. Outputs a raw logit;
+    use BCEWithLogitsLoss (sigmoid is applied internally by the loss / at inference)."""
 
-    backbone.add(tf.keras.layers.Dense(64, activation="relu", name="dense_64"))
-    backbone.add(tf.keras.layers.Dropout(0.2, name="dropout_3"))
-    backbone.add(tf.keras.layers.Dense(21, activation="softmax", name="location_output"))
+    def __init__(self, input_dim: int) -> None:
+        super().__init__()
+        self.backbone = SharedLSTMBackbone(input_dim)
+        self.dense_16 = nn.Linear(64, 16)
+        self.relu = nn.ReLU()
+        self.dropout_3 = nn.Dropout(0.2)
+        self.occurrence_output = nn.Linear(16, 1)
 
-    backbone.compile(
-        optimizer="adam",
-        loss="sparse_categorical_crossentropy",
-        metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")],
-    )
-    return backbone
-
-
-def build_state_estimation_model() -> tf.keras.Model:
-    backbone = build_shared_lstm_backbone()
-
-    # Regression head maps the latent state back to the full 20-line capacity vector.
-    backbone.add(tf.keras.layers.Dense(64, activation="relu", name="dense_64"))
-    backbone.add(tf.keras.layers.Dropout(0.2, name="dropout_3"))
-
-    # Linear activation is appropriate for continuous-valued outputs.
-    backbone.add(tf.keras.layers.Dense(20, activation="linear", name="state_output"))
-
-    backbone.compile(
-        optimizer="adam",
-        loss="mse",
-        metrics=[tf.keras.metrics.MeanAbsoluteError(name="mae")],
-    )
-    return backbone
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        out = self.backbone(x)
+        out = self.relu(self.dense_16(out))
+        out = self.dropout_3(out)
+        out = self.occurrence_output(out)
+        return out.squeeze(-1)  # raw logit, shape (batch,)
 
 
-def save_model_architecture(model: tf.keras.Model, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(model.to_json(indent=2), encoding="utf-8")
+class AttackLocationModel(nn.Module):
+    """MODEL 2 - 21-way location classification. Outputs raw logits;
+    use CrossEntropyLoss (softmax applied internally by the loss)."""
+
+    def __init__(self, input_dim: int, num_classes: int = 21) -> None:
+        super().__init__()
+        self.backbone = SharedLSTMBackbone(input_dim)
+        self.dense_64 = nn.Linear(64, 64)
+        self.relu = nn.ReLU()
+        self.dropout_3 = nn.Dropout(0.2)
+        self.location_output = nn.Linear(64, num_classes)
+
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        out = self.backbone(x)
+        out = self.relu(self.dense_64(out))
+        out = self.dropout_3(out)
+        out = self.location_output(out)
+        return out  # raw logits, shape (batch, num_classes)
+
+
+class StateEstimationModel(nn.Module):
+    """MODEL 3 - regression back to the full 20-line capacity vector.
+    Linear output head, trained with MSELoss."""
+
+    def __init__(self, input_dim: int, output_dim: int = 20) -> None:
+        super().__init__()
+        self.backbone = SharedLSTMBackbone(input_dim)
+        self.dense_64 = nn.Linear(64, 64)
+        self.relu = nn.ReLU()
+        self.dropout_3 = nn.Dropout(0.2)
+        self.state_output = nn.Linear(64, output_dim)
+
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        out = self.backbone(x)
+        out = self.relu(self.dense_64(out))
+        out = self.dropout_3(out)
+        out = self.state_output(out)
+        return out  # shape (batch, output_dim)
+
+
+def build_attack_occurrence_model(input_dim: int) -> AttackOccurrenceModel:
+    return AttackOccurrenceModel(input_dim)
+
+
+def build_attack_location_model(input_dim: int, num_classes: int = 21) -> AttackLocationModel:
+    return AttackLocationModel(input_dim, num_classes)
+
+
+def build_state_estimation_model(input_dim: int, output_dim: int = 20) -> StateEstimationModel:
+    return StateEstimationModel(input_dim, output_dim)
+
+
+def count_params(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters())
 
 
 def main() -> None:
     try:
-        occurrence_model = build_attack_occurrence_model()
-        location_model = build_attack_location_model()
-        state_model = build_state_estimation_model()
+        # Default input_dim matches the repo's default selected_lines=6 (Po=0.3 over 20 lines).
+        input_dim = 6
+
+        occurrence_model = build_attack_occurrence_model(input_dim)
+        location_model = build_attack_location_model(input_dim)
+        state_model = build_state_estimation_model(input_dim)
 
         print("MODEL 1 - Attack Occurrence Detection")
-        occurrence_model.summary()
+        print(occurrence_model)
+        print(f"Trainable parameters: {count_params(occurrence_model):,}")
         print()
 
         print("MODEL 2 - Attack Location Detection")
-        location_model.summary()
+        print(location_model)
+        print(f"Trainable parameters: {count_params(location_model):,}")
         print()
 
         print("MODEL 3 - State Estimation")
-        state_model.summary()
+        print(state_model)
+        print(f"Trainable parameters: {count_params(state_model):,}")
 
-        save_model_architecture(occurrence_model, MODELS_DIR / "attack_occurrence_model.json")
-        save_model_architecture(location_model, MODELS_DIR / "attack_location_model.json")
-        save_model_architecture(state_model, MODELS_DIR / "state_estimation_model.json")
-
-        print(f"\nSaved model architectures to: {MODELS_DIR}")
-        print("- attack_occurrence_model.json")
-        print("- attack_location_model.json")
-        print("- state_estimation_model.json")
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"\nModel classes are defined in build_lstm_model.py.")
+        print("They are instantiated directly (no separate architecture JSON needed,")
+        print("unlike the Keras version) - train_models.py imports these classes.")
     except Exception as exc:
         print(f"ERROR: {exc}")
         raise SystemExit(1) from exc

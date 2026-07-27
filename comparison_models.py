@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 import os
 
-os.makedirs('plots', exist_ok=True)
+os.makedirs("plots", exist_ok=True)
 
 try:
     import matplotlib
@@ -13,30 +13,23 @@ try:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: matplotlib is required to run comparison_models.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: matplotlib is required to run comparison_models.py. Install it and try again.") from exc
 
 try:
     import numpy as np
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: numpy is required to run comparison_models.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: numpy is required to run comparison_models.py. Install it and try again.") from exc
 
 try:
     import seaborn as sns
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: seaborn is required to run comparison_models.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: seaborn is required to run comparison_models.py. Install it and try again.") from exc
 
 try:
-    import tensorflow as tf
+    import torch
+    import torch.nn as nn
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: tensorflow is required to run comparison_models.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: torch is required to run comparison_models.py. Install it and try again.") from exc
 
 try:
     from sklearn.ensemble import RandomForestClassifier
@@ -51,18 +44,18 @@ try:
     from sklearn.model_selection import RandomizedSearchCV
     from sklearn.utils.class_weight import compute_class_weight
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: scikit-learn is required to run comparison_models.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: scikit-learn is required to run comparison_models.py. Install it and try again.") from exc
 
+from build_lstm_model import AttackOccurrenceModel
+from train_utils import EarlyStopping, get_device, iterate_minibatches, save_checkpoint
 
 DATA_DIR = Path("data/preprocessed")
 MODELS_DIR = Path("models")
 PLOTS_DIR = Path("plots")
 
-LSTM_MODEL_PATH = MODELS_DIR / "best_occurrence_model.h5"
+LSTM_MODEL_PATH = MODELS_DIR / "best_occurrence_model.pt"
 RANDOM_FOREST_PATH = MODELS_DIR / "random_forest.pkl"
-FNN_MODEL_PATH = MODELS_DIR / "fnn_model.h5"
+FNN_MODEL_PATH = MODELS_DIR / "fnn_model.pt"
 COMPARISON_PLOT_PATH = PLOTS_DIR / "model_comparison.png"
 
 
@@ -83,60 +76,49 @@ def flatten_sequences(sequences: np.ndarray) -> np.ndarray:
     return sequences.reshape(sequences.shape[0], -1).astype(np.float32)
 
 
-def load_lstm_model() -> tf.keras.Model:
+def load_lstm_model(device: "torch.device") -> "torch.nn.Module":
     if not LSTM_MODEL_PATH.exists():
-        raise FileNotFoundError(
-            f"Missing LSTM checkpoint: {LSTM_MODEL_PATH}. Train the LSTM models first."
-        )
-    return tf.keras.models.load_model(LSTM_MODEL_PATH, compile=False)
-
-
-def build_fnn_model(input_dim: int) -> tf.keras.Model:
-    model = tf.keras.Sequential(
-        [
-            tf.keras.layers.Input(shape=(input_dim,), name="flattened_sequence_input"),
-            tf.keras.layers.Dense(128, activation="relu", name="dense_128"),
-            tf.keras.layers.Dropout(0.2, name="dropout_1"),
-            tf.keras.layers.Dense(64, activation="relu", name="dense_64"),
-            tf.keras.layers.Dropout(0.2, name="dropout_2"),
-            tf.keras.layers.Dense(16, activation="relu", name="dense_16"),
-            tf.keras.layers.Dropout(0.2, name="dropout_3"),
-            tf.keras.layers.Dense(1, activation="sigmoid", name="occurrence_output"),
-        ],
-        name="fnn_occurrence_model",
-    )
-    model.compile(
-        optimizer="adam",
-        loss="binary_crossentropy",
-        metrics=[
-            tf.keras.metrics.BinaryAccuracy(name="accuracy"),
-            tf.keras.metrics.Precision(name="precision"),
-            tf.keras.metrics.Recall(name="recall"),
-        ],
-    )
+        raise FileNotFoundError(f"Missing LSTM checkpoint: {LSTM_MODEL_PATH}. Train the LSTM models first.")
+    checkpoint = torch.load(LSTM_MODEL_PATH, map_location="cpu", weights_only=False)
+    model = AttackOccurrenceModel(checkpoint["input_dim"])
+    model.load_state_dict(checkpoint["state_dict"])
+    model.to(device)
+    model.eval()
     return model
+
+
+class FNNOccurrenceModel(nn.Module):
+    """Fully-connected baseline on flattened sequences (mirrors the Keras FNN)."""
+
+    def __init__(self, input_dim: int) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(64, 16),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(16, 1),
+        )
+
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        return self.net(x).squeeze(-1)
 
 
 def compute_binary_class_weight(labels: np.ndarray) -> dict[int, float]:
     flattened = np.asarray(labels).reshape(-1).astype(int)
     classes = np.unique(flattened)
     weights = compute_class_weight(class_weight="balanced", classes=classes, y=flattened)
-    return {int(class_value): float(weight) for class_value, weight in zip(classes, weights, strict=False)}
+    return {int(c): float(w) for c, w in zip(classes, weights)}
 
 
 def plot_confusion_matrix(matrix: np.ndarray, labels: list[str], title: str, output_path: Path) -> None:
     figure, axis = plt.subplots(figsize=(6.5, 5.5))
-    sns.heatmap(
-        matrix,
-        annot=True,
-        fmt=".2f",
-        cmap="Blues",
-        xticklabels=labels,
-        yticklabels=labels,
-        vmin=0.0,
-        vmax=1.0,
-        ax=axis,
-    )
+    sns.heatmap(matrix, annot=True, fmt=".2f", cmap="Blues", xticklabels=labels, yticklabels=labels, vmin=0.0, vmax=1.0, ax=axis)
     axis.set_title(title)
     axis.set_xlabel("Predicted")
     axis.set_ylabel("Actual")
@@ -157,55 +139,18 @@ def plot_comparison_bar_chart(scores: dict[str, float], output_path: Path) -> No
     axis.set_title("Model Comparison - Attack Detection")
     axis.grid(axis="y", alpha=0.25)
 
-    for bar, value in zip(bars, values, strict=False):
-        axis.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.01,
-            f"{value:.4f}",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-        )
+    for bar, value in zip(bars, values):
+        axis.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01, f"{value:.4f}", ha="center", va="bottom", fontsize=10)
 
     figure.tight_layout()
     figure.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(figure)
 
-def plot_state_estimation(test_df, predicted_line1, predicted_line2, predicted_line3):
-    """Generates the State Estimation subplots for transmission lines.
-    predicted_lineX must be model-output arrays (same length as test_df), not constants.
-    """
-    import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
-    fig.suptitle('State Estimation Results', fontsize=14)
-    timesteps = range(len(test_df))
-
-    axes[0].plot(timesteps, test_df['Line1_Real'], label='Real Line 1', color='#1f77b4', linewidth=2)
-    axes[0].plot(timesteps, predicted_line1, label='Predicted Line 1', color='#e377c2', linestyle='--', linewidth=1.5)
-    axes[0].set_ylabel('Capacity')
-    axes[0].legend(loc='upper right')
-    axes[0].grid(True, alpha=0.3)
-
-    axes[1].plot(timesteps, test_df['Line2_Real'], label='Real Line 2', color='#1f77b4', linewidth=2)
-    axes[1].plot(timesteps, predicted_line2, label='Predicted Line 2', color='#e377c2', linestyle='--', linewidth=1.5)
-    axes[1].set_ylabel('Capacity')
-    axes[1].legend(loc='upper right')
-    axes[1].grid(True, alpha=0.3)
-
-    axes[2].plot(timesteps, test_df['Line3_Real'], label='Real Line 3', color='#1f77b4', linewidth=2)
-    axes[2].plot(timesteps, predicted_line3, label='Predicted Line 3', color='#e377c2', linestyle='--', linewidth=1.5)
-    axes[2].set_ylabel('Capacity')
-    axes[2].set_xlabel('Timestep')
-    axes[2].legend(loc='upper right')
-    axes[2].grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig('plots/state_estimation_results.png', dpi=300)
-    plt.close()
-    
-def evaluate_lstm_model(model: tf.keras.Model, x_test: np.ndarray, y_test: np.ndarray) -> float:
-    probabilities = np.asarray(model.predict(x_test, verbose=0)).reshape(-1)
+def evaluate_lstm_model(model: "torch.nn.Module", x_test: np.ndarray, y_test: np.ndarray, device: "torch.device") -> float:
+    with torch.no_grad():
+        logits = model(torch.from_numpy(x_test).float().to(device))
+        probabilities = torch.sigmoid(logits).cpu().numpy().reshape(-1)
     predictions = (probabilities >= 0.5).astype(int)
     y_true = np.asarray(y_test).reshape(-1).astype(int)
 
@@ -226,12 +171,7 @@ def evaluate_lstm_model(model: tf.keras.Model, x_test: np.ndarray, y_test: np.nd
     return f1
 
 
-def evaluate_random_forest(
-    x_train_flat: np.ndarray,
-    y_train: np.ndarray,
-    x_test_flat: np.ndarray,
-    y_test: np.ndarray,
-) -> float:
+def evaluate_random_forest(x_train_flat: np.ndarray, y_train: np.ndarray, x_test_flat: np.ndarray, y_test: np.ndarray) -> float:
     print("\nBuilding Random Forest with RandomizedSearchCV...")
     param_distributions = {
         "n_estimators": [50, 100, 200, 300],
@@ -285,64 +225,55 @@ def train_fnn(
     y_val: np.ndarray,
     x_test_flat: np.ndarray,
     y_test: np.ndarray,
+    device: "torch.device",
 ) -> float:
     print("\nTraining Feedforward Neural Network...")
-    model = build_fnn_model(x_train_flat.shape[1])
-    model.summary()
-
-    callbacks = [
-        tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss",
-            patience=10,
-            restore_best_weights=True,
-            verbose=1,
-        ),
-        tf.keras.callbacks.ModelCheckpoint(
-            filepath=str(FNN_MODEL_PATH),
-            monitor="val_loss",
-            save_best_only=True,
-            save_weights_only=False,
-            verbose=1,
-        ),
-        tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss",
-            factor=0.5,
-            patience=5,
-            verbose=1,
-            min_lr=1e-6,
-        ),
-    ]
+    model = FNNOccurrenceModel(x_train_flat.shape[1]).to(device)
+    print(model)
 
     class_weight = compute_binary_class_weight(y_train)
     print(f"Class weights: {class_weight}")
+    pos_weight = torch.tensor([class_weight[1] / class_weight[0]], dtype=torch.float32).to(device)
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+    optimizer = torch.optim.Adam(model.parameters())
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6)
+    early_stopping = EarlyStopping(patience=10)
+
+    x_train_t = torch.from_numpy(x_train_flat).float()
+    y_train_t = torch.from_numpy(y_train).float().reshape(-1)
+    x_val_t = torch.from_numpy(x_val_flat).float().to(device)
+    y_val_t = torch.from_numpy(y_val).float().reshape(-1).to(device)
 
     start_time = time.perf_counter()
-    model.fit(
-        x_train_flat,
-        y_train,
-        validation_data=(x_val_flat, y_val),
-        epochs=60,
-        batch_size=1024,
-        callbacks=callbacks,
-        class_weight=class_weight,
-        verbose=1,
-    )
+    for epoch in range(1, 61):
+        model.train()
+        for xb, yb in iterate_minibatches(x_train_t, y_train_t, 1024, shuffle=True):
+            xb, yb = xb.to(device), yb.to(device)
+            optimizer.zero_grad()
+            loss = loss_fn(model(xb), yb)
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            val_loss = loss_fn(model(x_val_t), y_val_t).item()
+        scheduler.step(val_loss)
+        print(f"Epoch {epoch}/60 - val_loss: {val_loss:.4f}")
+
+        if early_stopping.step(val_loss, model, epoch):
+            print(f"Early stopping at epoch {epoch}")
+            break
+
+    early_stopping.restore_best_weights(model)
     elapsed = time.perf_counter() - start_time
     print(f"FNN training completed in {elapsed:.2f} seconds")
 
-    if FNN_MODEL_PATH.exists():
-        model = tf.keras.models.load_model(FNN_MODEL_PATH, compile=False)
-        model.compile(
-            optimizer="adam",
-            loss="binary_crossentropy",
-            metrics=[
-                tf.keras.metrics.BinaryAccuracy(name="accuracy"),
-                tf.keras.metrics.Precision(name="precision"),
-                tf.keras.metrics.Recall(name="recall"),
-            ],
-        )
+    save_checkpoint(model, x_train_flat.shape[1], {"model_type": "fnn"}, FNN_MODEL_PATH)
 
-    probabilities = np.asarray(model.predict(x_test_flat, verbose=0)).reshape(-1)
+    model.eval()
+    with torch.no_grad():
+        probabilities = torch.sigmoid(model(torch.from_numpy(x_test_flat).float().to(device))).cpu().numpy().reshape(-1)
     predictions = (probabilities >= 0.5).astype(int)
     f1 = float(f1_score(y_test, predictions, zero_division=0))
     accuracy = float(accuracy_score(y_test, predictions))
@@ -374,6 +305,8 @@ def print_comparison_table(lstm_f1: float, rf_f1: float, fnn_f1: float) -> None:
 def main() -> None:
     try:
         ensure_output_dirs()
+        device = get_device()
+        print(f"Using device: {device}")
 
         print("Loading preprocessed arrays...")
         x_train = load_numpy_array(DATA_DIR / "X_train.npy")
@@ -390,53 +323,29 @@ def main() -> None:
         print(f"Flattened training shape: {x_train_flat.shape}")
 
         print("Loading best LSTM model...")
-        lstm_model = load_lstm_model()
-        lstm_f1 = evaluate_lstm_model(lstm_model, x_test, y_test_occur.reshape(-1))
+        lstm_model = load_lstm_model(device)
+        lstm_f1 = evaluate_lstm_model(lstm_model, x_test, y_test_occur.reshape(-1), device)
 
-        rf_f1 = evaluate_random_forest(
-            x_train_flat,
-            y_train_occur.reshape(-1),
-            x_test_flat,
-            y_test_occur.reshape(-1),
-        )
+        rf_f1 = evaluate_random_forest(x_train_flat, y_train_occur.reshape(-1), x_test_flat, y_test_occur.reshape(-1))
 
         fnn_f1 = train_fnn(
-            x_train_flat,
-            y_train_occur.reshape(-1),
-            x_val_flat,
-            y_val_occur.reshape(-1),
-            x_test_flat,
-            y_test_occur.reshape(-1),
+            x_train_flat, y_train_occur.reshape(-1), x_val_flat, y_val_occur.reshape(-1), x_test_flat, y_test_occur.reshape(-1), device
         )
 
-        plot_comparison_bar_chart(
-            {"LSTM": lstm_f1, "Random Forest": rf_f1, "FNN": fnn_f1},
-            COMPARISON_PLOT_PATH,
-        )
+        plot_comparison_bar_chart({"LSTM": lstm_f1, "Random Forest": rf_f1, "FNN": fnn_f1}, COMPARISON_PLOT_PATH)
         print_comparison_table(lstm_f1, rf_f1, fnn_f1)
         print(f"\nSaved comparison chart to: {COMPARISON_PLOT_PATH}")
         print(f"Saved Random Forest model to: {RANDOM_FOREST_PATH}")
         print(f"Saved FNN model to: {FNN_MODEL_PATH}")
-        
+
         # === DASHBOARD DYNAMIC METRICS COUPLING SYSTEM ===
-        import pickle
-        from pathlib import Path
-        
-        metrics_to_save = {
-            'lstm_f1': lstm_f1,
-            'rf_f1': rf_f1,
-            'fnn_f1': fnn_f1
-        }
-        
+        metrics_to_save = {"lstm_f1": lstm_f1, "rf_f1": rf_f1, "fnn_f1": fnn_f1}
         base_path = Path(__file__).resolve().parent
         backup_file = base_path / "plots" / "metrics_backup.pkl"
         backup_file.parent.mkdir(parents=True, exist_ok=True)
-        
         with open(backup_file, "wb") as f:
             pickle.dump(metrics_to_save, f)
-            
         print("-> Dashboard dynamic metrics backup saved successfully with live metrics!")
-        # =================================================
     except Exception as exc:
         print(f"ERROR: {exc}")
         raise SystemExit(1) from exc

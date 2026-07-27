@@ -9,46 +9,39 @@ try:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: matplotlib is required to run noise_test.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: matplotlib is required to run noise_test.py. Install it and try again.") from exc
 
 try:
     import numpy as np
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: numpy is required to run noise_test.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: numpy is required to run noise_test.py. Install it and try again.") from exc
 
 try:
     import pandas as pd
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: pandas is required to run noise_test.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: pandas is required to run noise_test.py. Install it and try again.") from exc
 
 try:
-    import tensorflow as tf
+    import torch
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: tensorflow is required to run noise_test.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: torch is required to run noise_test.py. Install it and try again.") from exc
 
 try:
     from sklearn.metrics import f1_score
 except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "ERROR: scikit-learn is required to run noise_test.py. Install it and try again."
-    ) from exc
+    raise SystemExit("ERROR: scikit-learn is required to run noise_test.py. Install it and try again.") from exc
 
+from build_lstm_model import AttackOccurrenceModel
+from comparison_models import FNNOccurrenceModel
+from train_utils import get_device
 
 DATA_DIR = Path("data/preprocessed")
 MODELS_DIR = Path("models")
 PLOTS_DIR = Path("plots")
 
-LSTM_MODEL_PATH = MODELS_DIR / "best_occurrence_model.h5"
+LSTM_MODEL_PATH = MODELS_DIR / "best_occurrence_model.pt"
 RANDOM_FOREST_PATH = MODELS_DIR / "random_forest.pkl"
-FNN_MODEL_PATH = MODELS_DIR / "fnn_model.h5"
+FNN_MODEL_PATH = MODELS_DIR / "fnn_model.pt"
 
 NOISE_LEVELS = [0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5, 1.0]
 
@@ -63,10 +56,13 @@ def load_numpy_array(path: Path) -> np.ndarray:
     return np.load(path, allow_pickle=False)
 
 
-def load_lstm_model() -> tf.keras.Model:
+def load_lstm_model(device) -> "torch.nn.Module":
     if not LSTM_MODEL_PATH.exists():
         raise FileNotFoundError(f"Missing LSTM model checkpoint: {LSTM_MODEL_PATH}")
-    return tf.keras.models.load_model(LSTM_MODEL_PATH, compile=False)
+    checkpoint = torch.load(LSTM_MODEL_PATH, map_location="cpu", weights_only=False)
+    model = AttackOccurrenceModel(checkpoint["input_dim"])
+    model.load_state_dict(checkpoint["state_dict"])
+    return model.to(device).eval()
 
 
 def load_random_forest_model():
@@ -76,10 +72,13 @@ def load_random_forest_model():
         return pickle.load(file_handle)
 
 
-def load_fnn_model() -> tf.keras.Model:
+def load_fnn_model(device) -> "torch.nn.Module":
     if not FNN_MODEL_PATH.exists():
         raise FileNotFoundError(f"Missing FNN model checkpoint: {FNN_MODEL_PATH}")
-    return tf.keras.models.load_model(FNN_MODEL_PATH, compile=False)
+    checkpoint = torch.load(FNN_MODEL_PATH, map_location="cpu", weights_only=False)
+    model = FNNOccurrenceModel(checkpoint["input_dim"])
+    model.load_state_dict(checkpoint["state_dict"])
+    return model.to(device).eval()
 
 
 def flatten_sequences(sequences: np.ndarray) -> np.ndarray:
@@ -93,29 +92,27 @@ def add_noise(rng: np.random.Generator, x_test: np.ndarray, sigma: float) -> np.
     return (x_test + noise).astype(np.float32)
 
 
-def predict_binary_probabilities(model, inputs: np.ndarray) -> np.ndarray:
-    predictions = np.asarray(model.predict(inputs, verbose=0))
-    return predictions.reshape(-1)
+def predict_binary_probabilities(model, inputs: np.ndarray, device) -> np.ndarray:
+    with torch.no_grad():
+        logits = model(torch.from_numpy(inputs).float().to(device))
+        return torch.sigmoid(logits).cpu().numpy().reshape(-1)
 
 
 def compute_f1(y_true: np.ndarray, predictions: np.ndarray) -> float:
     return float(f1_score(y_true.reshape(-1).astype(int), predictions.astype(int), zero_division=0))
 
 
-def plot_results(results: pd.DataFrame, output_path: Path) -> None:
+def plot_results(results: "pd.DataFrame", output_path: Path) -> None:
     figure, axis = plt.subplots(figsize=(10, 6))
-
     axis.plot(results["noise_level"], results["LSTM"], marker="o", color="green", label="LSTM")
     axis.plot(results["noise_level"], results["RF"], marker="o", color="orange", label="RF")
     axis.plot(results["noise_level"], results["FNN"], marker="o", color="blue", label="FNN")
-
     axis.set_xscale("log")
     axis.set_xlabel("Noise level (sigma)")
     axis.set_ylabel("F1 Score")
     axis.set_title("Model Robustness to Sensor Noise")
     axis.grid(True, which="both", linestyle="--", alpha=0.35)
     axis.legend()
-
     figure.tight_layout()
     figure.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(figure)
@@ -123,6 +120,8 @@ def plot_results(results: pd.DataFrame, output_path: Path) -> None:
 
 def main() -> None:
     ensure_output_dir()
+    device = get_device()
+    print(f"Using device: {device}")
 
     x_test = load_numpy_array(DATA_DIR / "X_test.npy").astype(np.float32)
     y_test_occur = load_numpy_array(DATA_DIR / "y_test_occur.npy").reshape(-1).astype(int)
@@ -130,12 +129,11 @@ def main() -> None:
     if x_test.ndim != 3:
         raise ValueError(f"Expected X_test to be 3D, got shape {x_test.shape}")
 
-    lstm_model = load_lstm_model()
+    lstm_model = load_lstm_model(device)
     random_forest = load_random_forest_model()
-    fnn_model = load_fnn_model()
+    fnn_model = load_fnn_model(device)
 
     rng = np.random.default_rng(seed=42)
-    x_test_flat = flatten_sequences(x_test)
 
     rows: list[dict[str, float]] = []
 
@@ -143,11 +141,11 @@ def main() -> None:
         x_noisy = add_noise(rng, x_test, sigma)
         x_noisy_flat = flatten_sequences(x_noisy)
 
-        lstm_probabilities = predict_binary_probabilities(lstm_model, x_noisy)
+        lstm_probabilities = predict_binary_probabilities(lstm_model, x_noisy, device)
         lstm_predictions = (lstm_probabilities >= 0.5).astype(int)
 
         rf_predictions = random_forest.predict(x_noisy_flat)
-        fnn_probabilities = predict_binary_probabilities(fnn_model, x_noisy_flat)
+        fnn_probabilities = predict_binary_probabilities(fnn_model, x_noisy_flat, device)
         fnn_predictions = (fnn_probabilities >= 0.5).astype(int)
 
         row = {
