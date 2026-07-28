@@ -1,4 +1,5 @@
 from __future__ import annotations
+from joblib import parallel_backend
 
 import pickle
 import time
@@ -175,23 +176,24 @@ def evaluate_random_forest(x_train_flat: np.ndarray, y_train: np.ndarray, x_test
     print("\nBuilding Random Forest with RandomizedSearchCV...")
     param_distributions = {
         "n_estimators": [50, 100, 200, 300],
-        "max_depth": [5, 10, 20, None],
+        "max_depth": [5, 10, 20],
         "min_samples_split": [2, 5, 10],
     }
 
     search = RandomizedSearchCV(
-        estimator=RandomForestClassifier(random_state=42, n_jobs=2),
+        estimator=RandomForestClassifier(random_state=42, n_jobs=-1),
         param_distributions=param_distributions,
-        n_iter=12,
-        cv=3,
+        n_iter=4,
+        cv=2,
         scoring="f1",
         random_state=42,
-        n_jobs=2,
+        n_jobs=-1,
         verbose=1,
     )
 
     start_time = time.perf_counter()
-    search.fit(x_train_flat, y_train)
+    with parallel_backend('threading', n_jobs=-1):
+        search.fit(x_train_flat, y_train)
     elapsed = time.perf_counter() - start_time
     print(f"Random Forest search completed in {elapsed:.2f} seconds")
     print(f"Best RF parameters: {search.best_params_}")
