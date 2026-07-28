@@ -180,13 +180,13 @@ def evaluate_random_forest(x_train_flat: np.ndarray, y_train: np.ndarray, x_test
     }
 
     search = RandomizedSearchCV(
-        estimator=RandomForestClassifier(random_state=42, n_jobs=-1),
+        estimator=RandomForestClassifier(random_state=42, n_jobs=2),
         param_distributions=param_distributions,
         n_iter=12,
         cv=3,
         scoring="f1",
         random_state=42,
-        n_jobs=-1,
+        n_jobs=2,
         verbose=1,
     )
 
