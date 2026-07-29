@@ -96,7 +96,7 @@ with tab1:
     c_left, c_mid, c_right = st.columns([1, 4, 1])
     with c_mid:
         if model_img_path.exists():
-            st.image(str(model_img_path), use_column_width=True, caption="Dynamic Evaluation Bar Performance")
+            st.image(str(model_img_path), use_container_width=True, caption="Dynamic Evaluation Bar Performance")
         else:
             st.error("⚠️ 'model_comparison.png' missing in plots/ folder. Run 'python comparison_models.py' to pipe dynamic components.")
 
@@ -108,14 +108,14 @@ with tab1:
     with col_diag1:
         st.markdown("#### 🟥 Confusion Matrix Validation")
         if confusion_img_path.exists():
-            st.image(str(confusion_img_path), use_column_width=True)
+            st.image(str(confusion_img_path), use_container_width=True)
         else:
             st.info("ℹ️ Confusion matrix image stack missing in plots/ directory.")
             
     with col_diag2:
         st.markdown("#### 🔵 State Estimation Cluster Map")
         if state_scatter_path.exists():
-            st.image(str(state_scatter_path), use_column_width=True)
+            st.image(str(state_scatter_path), use_container_width=True)
         else:
             st.info("ℹ️ 'state_scatter.png' matrix missing in plots/ distribution directory.")
 
@@ -129,7 +129,7 @@ with tab2:
         st.markdown("#### 📉 Occurrence Identification Curves")
         occ_curve_path = PLOTS_DIR / "occurrence_training_curves.png"
         if occ_curve_path.exists():
-            st.image(str(occ_curve_path), use_column_width=True)
+            st.image(str(occ_curve_path), use_container_width=True)
         else:
             st.info("ℹ️ Curve trace file empty.")
             
@@ -137,7 +137,7 @@ with tab2:
         st.markdown("#### 📉 Localization Isolation Process")
         loc_curve_path = PLOTS_DIR / "location_training_curves.png"
         if loc_curve_path.exists():
-            st.image(str(loc_curve_path), use_column_width=True)
+            st.image(str(loc_curve_path), use_container_width=True)
         else:
             st.info("ℹ️ Curve trace file empty.")
         
@@ -148,7 +148,7 @@ with tab2:
     sub_l, sub_m, sub_r = st.columns([1, 3, 1])
     with sub_m:
         if state_curve_path.exists():
-            st.image(str(state_curve_path), use_column_width=True)
+            st.image(str(state_curve_path), use_container_width=True)
 
 # ==================== TAB 3: STRESS TESTING ====================
 with tab3:
@@ -160,14 +160,14 @@ with tab3:
         st.markdown("#### 📊 Robustness to White Noise Injection")
         noise_plot_path = PLOTS_DIR / "noise_robustness.png"
         if noise_plot_path.exists():
-            st.image(str(noise_plot_path), use_column_width=True)
+            st.image(str(noise_plot_path), use_container_width=True)
         else:
             st.info("ℹ️ Matrix bounds calculated normally via fallback configuration.")
 
     with col_d2:
         st.markdown("#### 🌐 Spatial Missing Telemetry Bounds")
         if po_img_path.exists():
-            st.image(str(po_img_path), use_column_width=True)
+            st.image(str(po_img_path), use_container_width=True)
         else:
             st.error("⚠️ Partial observability map generation tracing failed.")
 
@@ -182,13 +182,13 @@ with tab3:
     with graph_col1:
         st.markdown("<p style='text-align: center; font-weight: bold;'>Real vs. Predicted (per line)</p>", unsafe_allow_html=True)
         if state_series_path.exists():
-            st.image(str(state_series_path), use_column_width=True)
+            st.image(str(state_series_path), use_container_width=True)
         else:
             st.info("ℹ️ 'state_estimation.png' missing. Run 'python evaluate_models.py' to generate it from the trained model.")
 
     with graph_col2:
         st.markdown("<p style='text-align: center; font-weight: bold;'>Predicted vs. Real Scatter</p>", unsafe_allow_html=True)
         if state_scatter_path.exists():
-            st.image(str(state_scatter_path), use_column_width=True)
+            st.image(str(state_scatter_path), use_container_width=True)
         else:
             st.info("ℹ️ 'state_scatter.png' missing. Run 'python evaluate_models.py' to generate it from the trained model.")
