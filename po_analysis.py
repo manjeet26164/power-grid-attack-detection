@@ -5,7 +5,6 @@ from pathlib import Path
 
 try:
     import matplotlib
-
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ModuleNotFoundError as exc:
@@ -39,6 +38,9 @@ TOTAL_LINES = 20
 SEQUENCE_LENGTH = 5
 RUNS_PER_PO = 5
 PAPER_REFERENCE_F1 = 0.95
+
+EVAL_BATCH_SIZE = 256
+TRAIN_BATCH_SIZE = 256
 
 
 def ensure_output_dir() -> None:
@@ -104,6 +106,7 @@ def extract_observations_and_labels(tensor: np.ndarray) -> tuple[np.ndarray, np.
     observations = np.asarray(tensor[:, :, capacity_channel], dtype=np.float32)
     attack_binary = np.asarray(tensor[:, :, attack_channel]) != 0
     occurrence = np.any(attack_binary, axis=1).astype(np.int64)
+
     return observations, occurrence
 
 
@@ -198,12 +201,32 @@ def evaluate_po_level(
 
     x_fit_t = torch.from_numpy(x_fit).float()
     y_fit_t = torch.from_numpy(y_fit).float()
-    x_val_t = torch.from_numpy(x_val).float().to(device)
-    y_val_t = torch.from_numpy(y_val).float().to(device)
+    x_val_t = torch.from_numpy(x_val).float()
+    y_val_t = torch.from_numpy(y_val).float()
+    x_test_t = torch.from_numpy(x_test).float()
+
+    def batched_val_loss() -> float:
+        total_loss = 0.0
+        total_count = 0
+        for xb, yb in iterate_minibatches(x_val_t, y_val_t, EVAL_BATCH_SIZE, shuffle=False):
+            xb, yb = xb.to(device), yb.to(device)
+            batch_loss = loss_fn(model(xb), yb)
+            total_loss += batch_loss.item() * xb.size(0)
+            total_count += xb.size(0)
+        return total_loss / max(1, total_count)
+
+    def batched_test_probabilities() -> np.ndarray:
+        all_probs = []
+        dummy_y = torch.zeros(x_test_t.size(0))
+        for xb, _ in iterate_minibatches(x_test_t, dummy_y, EVAL_BATCH_SIZE, shuffle=False):
+            xb = xb.to(device)
+            probs = torch.sigmoid(model(xb)).detach().cpu().numpy().reshape(-1)
+            all_probs.append(probs)
+        return np.concatenate(all_probs)
 
     for epoch in range(1, 61):
         model.train()
-        for xb, yb in iterate_minibatches(x_fit_t, y_fit_t, 1024, shuffle=True):
+        for xb, yb in iterate_minibatches(x_fit_t, y_fit_t, TRAIN_BATCH_SIZE, shuffle=True):
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad()
             loss = loss_fn(model(xb), yb)
@@ -212,18 +235,22 @@ def evaluate_po_level(
 
         model.eval()
         with torch.no_grad():
-            val_loss = loss_fn(model(x_val_t), y_val_t).item()
+            val_loss = batched_val_loss()
+
         print(f"Po={po_value} run={run_index} epoch={epoch}/60 val_loss={val_loss:.4f}")
 
         if early_stopping.step(val_loss, model, epoch):
             break
 
-    early_stopping.restore_best_weights(model)
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
+    early_stopping.restore_best_weights(model)
     model.eval()
     with torch.no_grad():
-        probabilities = torch.sigmoid(model(torch.from_numpy(x_test).float().to(device))).cpu().numpy().reshape(-1)
+        probabilities = batched_test_probabilities()
     predictions = (probabilities >= 0.5).astype(int)
+
     return float(f1_score(y_test, predictions, zero_division=0))
 
 
