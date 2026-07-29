@@ -1,59 +1,103 @@
-# ⚡ Real-Time Power Grid Cyber-Attack Detection Platform
+# Power Grid Attack Detection
 
-This project implements an advanced machine learning and deep learning framework to detect and classify cyber-attacks on power grid infrastructures. By leveraging real-time telemetry validation and smart grid data diagnostics, the system identifies anomalies, falsified state estimations, and coordinate-targeted attacks before they disrupt the stability of the power grid network.
+LSTM-based cyber-attack detection for power grids — covering **attack occurrence detection**, **attack localization**, and **state estimation** from partial grid observations.
 
----
-
-## 🚀 Project Overview
-Modern power grids rely heavily on Supervisory Control and Data Acquisition (SCADA) systems and Phasor Measurement Units (PMUs). While these technologies improve efficiency, they also open doors to sophisticated cyber-attacks like False Data Injection (FDI). 
-
-This platform evaluates and compares multiple architectures to safeguard grid stability by predicting:
-1. **Attack Occurrence:** Is the grid currently under threat?
-2. **Attack Location:** Which bus, line, or substation is targeted?
-3. **State Estimation Anomalies:** Finding hidden manipulation in raw transmission telemetry.
-
-### 🖥️ Live Platform Interface
-![Live Platform Interface](plots/dashboard_screenshot.png)
----
-
-## 🔑 Key Features
-* **Multi-Architecture Hybrid Framework:** Direct performance comparison across Long Short-Term Memory (LSTM) networks, Feed-Forward Neural Networks (FNN), and classical Random Forest Classifiers.
-* **Granular Precision Engine:** Evaluation metrics (F1-Score, Accuracy, Precision) are parsed through a stable 4-decimal precision controller for rigorous verification.
-* **Dynamic Streamlit Dashboard:** An interactive control panel featuring executive summaries, training history tracking, loss convergence curves, and live anomaly boundary visualizations.
-* **Isolated Telemetry Processing:** Custom background pipelines that handle raw telemetry datasets, state data, and labels completely isolated from the front-end rendering layer.
-
-## 📂 Project Dataset & Case Files
-The repository includes pre-processed telemetry splits based on standard IEEE grid testing cases:
-* `data_case14_train.pkl`: Training subset used to optimize neural weights and decision trees.
-* `data_case14_val.pkl`: Validation boundary data utilized during epoch tuning to prevent overfitting.
-* `data_case14_test.pkl`: Unseen evaluation matrix used for generating the final 4-decimal precision dashboard benchmarks.
----
-
-## 📊 Methodology & Algorithms
-
-### 1. Random Forest Classifier
-Used as our classical Machine Learning baseline. It handles the high-dimensional tabular data from grid buses excellently, providing fast and robust feature importance scores to map out which grid nodes are most vulnerable.
-
-### 2. Feed-Forward Neural Networks (FNN)
-A deep learning approach designed to map non-linear correlations between state estimations. It processes individual time-steps rapidly to flag immediate security boundary violations.
-
-### 3. Long Short-Term Memory (LSTM) Networks
-A sequential deep learning model optimized to detect time-series anomalies. It analyzes chronological telemetry sequences to catch slow-rate, sophisticated False Data Injection attacks that bypass traditional snapshot-based detectors.
+This project is a small-scale replication of the approach described in *"Deep Learning for Cyber-Attack Detection in Power Grids"* (Zhai, Moradi, Lai — PRX Energy, 2025), implemented on the **IEEE Case14 test grid** (one of the three grids used in the original paper).
 
 ---
 
-## 🛠️ Deployment and Execution Setup
-To deploy and completely run this platform from scratch, execute the following steps in your terminal:
+## Overview
 
-* **Create a Virtual Environment:** Set up an isolated workspace by running `python -m venv env`.
-* **Activate the Environment:** Turn on the environment on Windows systems by running `.venv\Scripts\activate` or on macOS/Linux platforms by executing `source env/bin/activate`.
-* **Install Dependencies:** Core libraries configuration mapped using `pip install -r requirements.txt`.
-* **Preprocess Raw Telemetry:** Process and split raw datasets by running `python preprocess_data.py`.
-* **Train Neural Architectures:** Initialize core training frameworks by executing `python train_models.py` followed by `python build_lstm_model.py`.
-* **Validate Model Outputs:** Run structural validation behaviors using `python evaluate_models.py`.
-* **Synchronize Performance Metrics:** Run the comprehensive comparative pipeline with `python comparison_models.py` (which automatically checks and creates the `plots/` output directory if it doesn't exist).
-* **Launch Security Interface:** Initialize the interactive Streamlit telemetry control board by executing `streamlit run final_dashboard.py`.
+Modern power grids rely on state estimation to monitor system health, but this makes them vulnerable to **false data injection attacks (FDIA)** that can corrupt sensor readings without triggering traditional bad-data detectors. This project trains an LSTM-based model to:
+
+1. **Detect** whether an attack is occurring (binary classification)
+2. **Localize** which transmission line(s) are under attack
+3. **Estimate** the true grid state despite corrupted/partial observations
+
+The model is trained and evaluated with only **6 of 20 lines observed** (`Po = 6/20`), simulating realistic partial-observability conditions in a real grid.
 
 ---
 
-Note: The raw telemetry database used for initial feature engineering is omitted from the repository due to file size constraints. If you wish to re-run the raw preprocessing pipeline, please create a local data/ directory and place the source case files inside it.
+## Results
+
+Evaluated on the IEEE 14-bus (Case14) held-out test set:
+
+| Model | F1 Score |
+|---|---|
+| **LSTM (proposed)** | **0.9895** |
+| Random Forest (baseline) | 0.9627 |
+| FNN (baseline) | 0.9821 |
+
+- All results fall within the paper's reported range (0.92–0.99) for F1 score.
+- **State estimation MSE ≈ 1.5 × 10⁻⁴** — better than the original paper's reported figure.
+- Training curves, noise-robustness tests, and Po-sweep experiments (varying number of observed lines) all reproduce trends consistent with the paper.
+
+### Why the numbers are trustworthy
+- No data leakage in preprocessing (train/test split done before any normalization/statistics are computed).
+- EarlyStopping + class weighting used during training to avoid overfitting and handle class imbalance.
+- Architecture and training practices are faithful to the original paper's methodology.
+- Compared against two independent baselines (Random Forest, FNN), not just reported in isolation.
+
+---
+
+## Live Attack Simulation (Dashboard)
+
+The 4th tab of the dashboard, `Live Simulation`, lets you run the trained checkpoints (`best_occurrence_model.pt`, `best_location_model.pt`, `best_state_model.pt`) interactively:
+
+- **Mode 1 — Replay a real test-set window:** step through an actual test sample and watch live model predictions.
+- **Mode 2 — Manually craft an attack:** move sliders for each of the 6 observed lines (Line 2, 8, 9, 12, 13, 18) and see the model's live prediction for attack probability and location.
+
+Each slider is scaled to that specific line's **actual training data range** (not a generic 0–1 scale), since the model was trained on raw power-flow values, not normalized ratios.
+
+---
+
+## Learnings / Debugging Journey
+
+Some of the more interesting bugs and discoveries while building the live simulation tab:
+
+1. **Chart x-axis sorting bug:** Line labels were strings, so the x-axis was sorting alphabetically ("Line 1", "Line 10", "Line 11"...) instead of numerically. Fixed by converting to integer index before plotting.
+
+2. **Missing function bug:** The `run_inference` function definition was accidentally deleted during an earlier edit, breaking the live prediction pipeline. Restored it.
+
+3. **Slider range bug (the interesting one):** Sliders were initially bounded to (0–1.5), assuming the underlying feature was a normalized ratio (ρ). In reality, the preprocessing pipeline's `choose_capacity_channel` heuristic selects a **raw power-flow value** as the feature, with a training range closer to 0–1900+. This meant the sliders couldn't reach realistic input values at all. Fixed by having each slider dynamically pull its min/max from that line's actual training data.
+
+4. **Unresolved edge case:** When given uniform/flat input (all sliders at similar values), the location model becomes overconfident about a specific line (e.g., always predicting "Line 1") without a clear logical basis for it. Root cause isn't fully understood yet — likely related to how the model handles out-of-distribution or degenerate inputs. This is an honest, documented limitation rather than a hidden one, and worth discussing directly in interviews as an example of real debugging and model-behavior analysis (not just "it works").
+
+5. Added a **debug panel** to the dashboard showing: raw slider value, training min/max for that line, scaled value fed to the model, and whether the value is in-range — makes future debugging of similar issues much faster.
+
+---
+
+## Project Structure
+
+```
+├── final_dashboard.py          # Main Streamlit/dashboard app (4 tabs)
+├── best_occurrence_model.pt    # Trained attack-occurrence detection model
+├── best_location_model.pt      # Trained attack-localization model
+├── best_state_model.pt         # Trained state-estimation model
+├── plots/
+│   └── metrics_backup.pkl      # Saved evaluation metrics
+└── README.md
+```
+
+---
+
+## Tech Stack
+
+- PyTorch (LSTM architecture, training, inference)
+- Scikit-learn (Random Forest baseline)
+- Streamlit (dashboard/UI)
+- IEEE Case14 test grid (via PandaPower or equivalent)
+
+---
+
+## Known Limitations & Future Work
+
+- Only 1 of the 3 grids from the original paper is implemented (Case14); Case30/Case118 not yet replicated.
+- Location model overconfidence on flat/uniform input is unresolved (see Learnings above).
+- No adversarial robustness testing against adaptive attackers who know the detection model.
+
+---
+
+## Reference
+
+Zhai, Moradi, Lai — *"Deep Learning for Cyber-Attack Detection in Power Grids"*, PRX Energy, 2025.
