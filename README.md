@@ -2,7 +2,7 @@
 
 LSTM-based cyber-attack detection for power grids — covering **attack occurrence detection**, **attack localization**, and **state estimation** from partial grid observations.
 
-This project is a small-scale replication of the approach described in *"Deep Learning for Cyber-Attack Detection in Power Grids"* (Zhai, Moradi, Lai — PRX Energy, 2025), implemented on the **IEEE Case14 test grid** (one of the three grids used in the original paper).
+This project is an independent, small-scale implementation of the approach described in *"Deep Learning for Cyber-Attack Detection in Power Grids"* (Zhai, Moradi, Lai — PRX Energy, 2025). The architecture and methodology follow the paper, while the code, preprocessing pipeline, baselines, and interactive dashboard are built from scratch. Evaluated on the **IEEE Case14 test grid** (one of the three grids used in the original paper).
 
 ---
 
@@ -67,16 +67,87 @@ Some of the more interesting bugs and discoveries while building the live simula
 
 ---
 
+## Setup & How to Run
+
+1. **Check your environment** (verifies Python version and that all dependencies import correctly):
+   ```bash
+   python setup_check.py
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Preprocess the raw data** (builds sliding-window sequences, applies the train-only scaler, saves arrays to disk):
+   ```bash
+   python preprocess_data.py
+   ```
+   Optional flags: `--data-dir`, `--output-dir`, `--sequence-length`, `--po`, `--selected-lines` (see `python preprocess_data.py --help`).
+
+4. **(Optional) Explore/visualize the preprocessed data:**
+   ```bash
+   python explore_data.py
+   python visualize_data.py
+   ```
+
+5. **Train the models:**
+   ```bash
+   python train_models.py
+   ```
+   This trains the LSTM occurrence/location/state models and saves the best checkpoints (`best_occurrence_model.pt`, `best_location_model.pt`, `best_state_model.pt`).
+
+6. **Train baselines for comparison:**
+   ```bash
+   python baseline_model.py
+   python comparison_models.py
+   ```
+
+7. **Evaluate the trained models:**
+   ```bash
+   python evaluate_models.py
+   ```
+
+8. **(Optional) Run robustness experiments:**
+   ```bash
+   python noise_test.py     # noise-robustness sweep
+   python po_analysis.py    # observability (Po) sweep
+   ```
+
+9. **Launch the interactive dashboard:**
+   ```bash
+   streamlit run final_dashboard.py
+   ```
+
+---
+
 ## Project Structure
 
 ```
-├── final_dashboard.py          # Main Streamlit/dashboard app (4 tabs)
+├── setup_check.py              # Verifies Python/dependency setup
+├── preprocess_data.py          # Builds sequences, scales data, train/test split
+├── explore_data.py             # Data exploration / summary stats
+├── visualize_data.py           # Data visualization utilities
+├── train_utils.py              # Shared training helpers (EarlyStopping, checkpointing, etc.)
+├── build_lstm_model.py         # LSTM model architecture
+├── train_models.py             # Trains occurrence / location / state LSTM models
+├── baseline_model.py           # Simple baseline classifiers
+├── comparison_models.py        # Random Forest / FNN baselines for comparison
+├── evaluate_models.py          # Evaluation metrics on the held-out test set
+├── noise_test.py               # Noise-robustness experiments
+├── po_analysis.py              # Partial-observability (Po) sweep experiments
+├── final_dashboard.py          # Main Streamlit dashboard app (4 tabs, incl. Live Simulation)
+├── results/
+│   └── baseline_metrics.json   # Saved baseline evaluation metrics
+├── requirements.txt
+└── README.md
+
+# Generated locally when you run the pipeline (not committed to git):
 ├── best_occurrence_model.pt    # Trained attack-occurrence detection model
 ├── best_location_model.pt      # Trained attack-localization model
 ├── best_state_model.pt         # Trained state-estimation model
-├── plots/
-│   └── metrics_backup.pkl      # Saved evaluation metrics
-└── README.md
+├── data/                       # Preprocessed arrays
+└── plots/                      # Training curves, evaluation plots
 ```
 
 ---
