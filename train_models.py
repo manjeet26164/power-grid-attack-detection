@@ -28,6 +28,7 @@ from train_utils import (
     plot_training_history,
     report_best_scores,
     save_checkpoint,
+    set_seed,
 )
 
 DATA_DIR = Path("data/preprocessed")
@@ -174,6 +175,7 @@ def mean_absolute_error(preds: "torch.Tensor", targets: "torch.Tensor") -> float
 
 def main() -> None:
     try:
+        set_seed(42)
         device = get_device()
         print(f"Using device: {device}")
 

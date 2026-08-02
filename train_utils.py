@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,22 @@ try:
     import matplotlib.pyplot as plt
 except ModuleNotFoundError as exc:
     raise SystemExit("ERROR: matplotlib is required. Install it and try again.") from exc
+
+
+def set_seed(seed: int = 42) -> None:
+    """Seeds every RNG used in this project (python, numpy, torch CPU/CUDA) for reproducible runs.
+
+    Call this once at the top of any script's main() before creating models,
+    shuffling data, or initializing weights.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    # Make cuDNN deterministic (slightly slower, but reproducible on GPU too)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def get_device() -> "torch.device":

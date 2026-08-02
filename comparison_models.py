@@ -48,7 +48,7 @@ except ModuleNotFoundError as exc:
     raise SystemExit("ERROR: scikit-learn is required to run comparison_models.py. Install it and try again.") from exc
 
 from build_lstm_model import AttackOccurrenceModel
-from train_utils import EarlyStopping, get_device, iterate_minibatches, save_checkpoint
+from train_utils import EarlyStopping, get_device, iterate_minibatches, save_checkpoint, set_seed
 
 DATA_DIR = Path("data/preprocessed")
 MODELS_DIR = Path("models")
@@ -306,6 +306,7 @@ def print_comparison_table(lstm_f1: float, rf_f1: float, fnn_f1: float) -> None:
 
 def main() -> None:
     try:
+        set_seed(42)
         ensure_output_dirs()
         device = get_device()
         print(f"Using device: {device}")
