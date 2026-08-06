@@ -1,5 +1,7 @@
 # Power Grid Attack Detection
 
+![tests](https://github.com/manjeet26164/power-grid-attack-detection/actions/workflows/tests.yml/badge.svg)
+
 LSTM-based cyber-attack detection for power grids — covering **attack occurrence detection**, **attack localization**, and **state estimation** from partial grid observations.
 
 This project is an independent, small-scale implementation of the approach described in *"Deep Learning for Cyber-Attack Detection in Power Grids"* (Zhai, Moradi, Lai — PRX Energy, 2025). The architecture and methodology follow the paper, while the code, preprocessing pipeline, baselines, and interactive dashboard are built from scratch. Evaluated on the **IEEE Case14 test grid** (one of the three grids used in the original paper).
